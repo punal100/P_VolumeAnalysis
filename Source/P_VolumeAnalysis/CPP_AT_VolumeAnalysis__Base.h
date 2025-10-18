@@ -10,6 +10,7 @@
 #include "GameFramework/Actor.h"
 #include "Components/SceneComponent.h"
 #include "Engine/World.h"
+#include "Engine/EngineTypes.h"
 #include "CPP_BPL__VolumeAnalysis.h"
 #include "CPP_AT_VolumeAnalysis__Base.generated.h"
 
@@ -46,6 +47,62 @@ public:
     /** Contains a Minimum of 8 Points, Making a Cube Shape */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Initial")
     FS_V3_1D__Array VolumePoints = FS_V3_1D__Array();
+
+    /** Number of samples along X axis inside the volume */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Sampling", meta = (ClampMin = "1", UIMin = "1"))
+    int32 SampleCountX = 16;
+
+    /** Number of samples along Y axis inside the volume */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Sampling", meta = (ClampMin = "1", UIMin = "1"))
+    int32 SampleCountY = 16;
+
+    /** Number of samples along Z axis inside the volume */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Sampling", meta = (ClampMin = "1", UIMin = "1"))
+    int32 SampleCountZ = 16;
+
+    /** Trace channel used for visibility checks */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Trace")
+    TEnumAsByte<ECollisionChannel> TraceChannel = ECC_Visibility;
+
+    /** Ignore the owner actor when tracing */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Trace")
+    bool bIgnoreSelf = true;
+
+    /** Max distance for line traces (0 = unlimited) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Trace", meta = (ClampMin = "0", UIMin = "0"))
+    float MaxTraceDistance = 0.f;
+
+    /** Whether to draw debug points/lines */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Debug")
+    bool bDrawDebug = true;
+
+    /** Draw the volume bounding box */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Debug")
+    bool bDrawDebugBox = true;
+
+    /** Draw trace rays from origin to sample points */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Debug")
+    bool bDrawDebugRays = true;
+
+    /** Draw sample points colored by visibility */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Debug")
+    bool bDrawDebugPoints = true;
+
+    /** Size of debug points */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Debug", meta = (ClampMin = "0", UIMin = "0"))
+    float DebugPointSize = 6.f;
+
+    /** Debug line thickness */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Debug", meta = (ClampMin = "0", UIMin = "0"))
+    float DebugLineThickness = 0.5f;
+
+    /** Duration seconds to persist debug draw (0 = one frame) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Debug", meta = (ClampMin = "0", UIMin = "0"))
+    float DebugDrawDuration = 2.0f;
+
+    /** Number of rows to process per tick (higher = faster but may hitch) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Performance", meta = (ClampMin = "1", UIMin = "1"))
+    int32 RowsPerTick = 8;
 
     //////////////////////////////////////////////////////////////////////////
     // EVENTS
@@ -100,6 +157,17 @@ private:
     TArray<FS_V3_1D__Array> AnalysisResults;
     int32 VisibleCount = 0;
     int32 HiddenCount = 0;
+
+    // Generated rows to analyze this run
+    TArray<FS_V3_1D__Array> PendingRows;
+    int32 CurrentRowIndex = 0;
+    bool bIsRunning = false;
+
+    // Internal: process a portion of rows each tick to avoid hitching
+    void ProcessRowsStep(int32 MaxRowsPerTick);
+
+    // Internal: draw an AABB
+    void DrawAABB(const FBox &Box, const FColor &Color) const;
 
     //////////////////////////////////////////////////////////////////////////
     // INTERNAL FUNCTIONS

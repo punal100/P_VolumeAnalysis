@@ -20,6 +20,10 @@ public:
 	// Row
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Math|Point|Array")
 	TArray<FVector> Points_1D_Array;
+
+	// Optional: Visibility mask aligned with Points_1D_Array (1 = Visible, 0 = Hidden)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Math|Point|Array")
+	TArray<uint8> VisibilityMask;
 };
 
 // Punal Manalan, NOTE: Not Required for For Volume Analysis but can be used in Future Extensions
@@ -58,4 +62,18 @@ public:
 		const FVector &Point,
 		const FVector &LineStart,
 		const FVector &LineEnd);
+
+	// Compute axis-aligned bounding box from a set of points
+	static FBox MakeBoxFromPoints(const TArray<FVector> &Points);
+
+	// Generate 3D grid rows across X for each Y,Z within the given box using counts per axis
+	static void GenerateGridRowsInBox_ByCounts(
+		const FBox &Box,
+		int32 CountX,
+		int32 CountY,
+		int32 CountZ,
+		TArray<FS_V3_1D__Array> &OutRows);
+
+	// Utility: Ensure a row's VisibilityMask matches its points length (filled with zeros)
+	static void EnsureRowMaskSize(FS_V3_1D__Array &Row);
 };
