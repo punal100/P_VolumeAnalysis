@@ -7,6 +7,9 @@
 #include "CPP_AT_VolumeAnalysis__Base.h"
 #include "Components/SceneComponent.h"
 #include "DrawDebugHelpers.h"
+#include "Logging/LogMacros.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogPVolActor, Log, All);
 
 /**
  * Constructor - Initialize default values and create components
@@ -221,6 +224,7 @@ void ACPP_AT_VolumeAnalysis_Base::ProcessRowsStep(int32 MaxRowsPerTick)
             Combined.Points_1D_Array.Append(Row.Points_1D_Array);
             Combined.VisibilityMask.Append(Row.VisibilityMask);
         }
+        UE_LOG(LogPVolActor, Display, TEXT("P_VolumeAnalysis: Broadcasting OnAnalysisComplete with %d points"), Combined.Points_1D_Array.Num());
         OnAnalysisComplete.Broadcast(Combined);
     }
 }

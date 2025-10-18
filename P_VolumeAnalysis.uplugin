@@ -11,7 +11,13 @@
 	"MarketplaceURL": "",
 	"SupportURL": "https://github.com/punal100/P_VolumeAnalysis",
 	"CanContainContent": true,
-	"Installed": true,
+	"Installed": false,
+    "Plugins": [
+        {
+            "Name": "ProceduralMeshComponent",
+            "Enabled": true
+        }
+    ],
 	"Modules": [
 		{
 			"Name": "P_VolumeAnalysis",

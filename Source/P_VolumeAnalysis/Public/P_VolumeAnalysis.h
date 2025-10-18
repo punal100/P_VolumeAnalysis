@@ -16,9 +16,9 @@
 class FP_VolumeAnalysis : public IModuleInterface
 {
 public:
-	/** Called when module is loaded into memory */
-	virtual void StartupModule() override;
+    /** Called when module is loaded into memory */
+    virtual void StartupModule() override;
 
-	/** Called when module is unloaded from memory */
-	virtual void ShutdownModule() override;
+    /** Called when module is unloaded from memory */
+    virtual void ShutdownModule() override;
 };

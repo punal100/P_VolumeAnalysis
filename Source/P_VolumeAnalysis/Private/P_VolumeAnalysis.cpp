@@ -5,6 +5,9 @@
  */
 
 #include "P_VolumeAnalysis.h"
+#include "Modules/ModuleManager.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogPVolumeAnalysis, Log, All);
 
 // Text localization namespace for this module
 #define LOCTEXT_NAMESPACE "FP_VolumeAnalysisModule"
@@ -15,8 +18,7 @@
  */
 void FP_VolumeAnalysis::StartupModule()
 {
-	// Module initialization logic goes here
-	// Currently empty as we don't have initialization steps
+    UE_LOG(LogPVolumeAnalysis, Display, TEXT("P_VolumeAnalysis: StartupModule"));
 }
 
 /**
@@ -25,8 +27,7 @@ void FP_VolumeAnalysis::StartupModule()
  */
 void FP_VolumeAnalysis::ShutdownModule()
 {
-	// Module cleanup logic goes here
-	// Currently empty as we don't have resources to clean up
+    UE_LOG(LogPVolumeAnalysis, Display, TEXT("P_VolumeAnalysis: ShutdownModule"));
 }
 
 // Undefine the localization namespace to avoid conflicts

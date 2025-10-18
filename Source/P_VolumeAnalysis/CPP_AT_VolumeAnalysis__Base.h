@@ -18,7 +18,7 @@
  * Delegate for broadcasting when Volume Analysis is complete
  * Allows other systems to react to finished analysis
  */
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnVolumeAnalysisComplete, const FS_V3_1D__Array &, AnalysisResultPoint);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnVolumeAnalysisComplete, FS_V3_1D__Array, AnalysisResultPoint);
 
 /**
  * Main VolumeAnalysis Actor class
