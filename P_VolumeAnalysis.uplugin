@@ -1,0 +1,22 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "Volume Analysis Plugin",
+	"Description": "Volume Analysis Plugin",
+	"Category": "Tool",
+	"CreatedBy": "Punal Manalan",
+	"CreatedByURL": "https://github.com/punal100/P_VolumeAnalysis",
+	"DocsURL": "https://github.com/punal100/P_VolumeAnalysis",
+	"MarketplaceURL": "",
+	"SupportURL": "https://github.com/punal100/P_VolumeAnalysis",
+	"CanContainContent": true,
+	"Installed": true,
+	"Modules": [
+		{
+			"Name": "P_VolumeAnalysis",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	]
+}
