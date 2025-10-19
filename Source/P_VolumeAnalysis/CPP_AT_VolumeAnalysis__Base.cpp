@@ -161,57 +161,80 @@ void ACPP_AT_VolumeAnalysis_Base::ProcessRowsStep(int32 MaxRowsPerTick)
         QueryParams.AddIgnoredActor(this);
     }
 
-    const FVector Origin = GetActorLocation();
-
     int32 RowsProcessed = 0;
     while (bIsRunning && RowsProcessed < MaxRowsPerTick && CurrentRowIndex < PendingRows.Num())
     {
-        FS_VolumeAnalysis_Point__Array Row = PendingRows[CurrentRowIndex];
+        // Work on the row by reference so neighbor updates persist in PendingRows
+        FS_VolumeAnalysis_Point__Array &Row = PendingRows[CurrentRowIndex];
         UCPP_BPL__VolumeAnalysis::EnsureRowMaskSize(Row);
 
-        for (int32 i = 0; i < Row.Points_1D_Array.Num(); ++i)
+        // Compute this row's Y/Z indices in the grid
+        const int32 ZIndex = CurrentRowIndex / SampleCountY;
+        const int32 YIndex = CurrentRowIndex % SampleCountY;
+
+        for (int32 xi = 0; xi < Row.Points_1D_Array.Num(); ++xi)
         {
-            const FVector Point = Row.Points_1D_Array[i].Points_1D_Array;
-            FVector Start = Origin;
-            FVector End = Point;
+            // Current point
+            FS_VolumeAnalysis_Point &A = Row.Points_1D_Array[xi];
 
-            if (MaxTraceDistance > 0.f)
+            auto TraceBetween = [&](const FVector &P0, const FVector &P1) -> bool
             {
-                const FVector Dir = (Point - Origin).GetSafeNormal();
-                const float DistToPoint = FVector::Dist(Origin, Point);
-                const float ClampDist = FMath::Min(MaxTraceDistance, DistToPoint);
-                End = Origin + Dir * ClampDist;
-            }
+                FHitResult Hit;
+                const bool bHit = GetWorld()->LineTraceSingleByChannel(Hit, P0, P1, TraceChannel, QueryParams);
+                return !bHit; // true if clear path
+            };
 
-            FHitResult Hit;
-            const bool bHit = GetWorld()->LineTraceSingleByChannel(Hit, Start, End, TraceChannel, QueryParams);
-
-            const bool bVisible = !bHit || (Hit.bBlockingHit && Hit.GetActor() == this);
-            Row.Points_1D_Array[i].VisibilityMask = bVisible ? 1 : 0;
-            if (bVisible)
+            // +X neighbor within the same row
+            if (xi + 1 < SampleCountX)
             {
-                ++VisibleCount;
-            }
-            else
-            {
-                ++HiddenCount;
-            }
-
-            if (bDrawDebug)
-            {
-                const FColor PColor = bVisible ? FColor::Green : FColor::Red;
-                if (bDrawDebugPoints)
+                FS_VolumeAnalysis_Point &B = Row.Points_1D_Array[xi + 1];
+                const bool bClear = TraceBetween(A.Points_1D_Array, B.Points_1D_Array);
+                if (bClear)
                 {
-                    DrawDebugPoint(GetWorld(), Point, DebugPointSize, PColor, /*bPersistentLines*/ DebugDrawDuration > 0.f, DebugDrawDuration);
+                    A.VisibilityMask = 1;
+                    B.VisibilityMask = 1;
                 }
-                if (bDrawDebugRays)
+                if (bDrawDebug && bDrawDebugRays)
                 {
-                    DrawDebugLine(GetWorld(), Start, bHit ? Hit.ImpactPoint : End, PColor, /*bPersistentLines*/ DebugDrawDuration > 0.f, DebugDrawDuration, 0, DebugLineThickness);
+                    DrawDebugLine(GetWorld(), A.Points_1D_Array, B.Points_1D_Array, bClear ? FColor::Green : FColor::Red, /*bPersistentLines*/ DebugDrawDuration > 0.f, DebugDrawDuration, 0, DebugLineThickness);
+                }
+            }
+
+            // +Y neighbor: next row in the same Z slice
+            if (YIndex + 1 < SampleCountY)
+            {
+                FS_VolumeAnalysis_Point__Array &RowY = PendingRows[CurrentRowIndex + 1];
+                FS_VolumeAnalysis_Point &B = RowY.Points_1D_Array[xi];
+                const bool bClear = TraceBetween(A.Points_1D_Array, B.Points_1D_Array);
+                if (bClear)
+                {
+                    A.VisibilityMask = 1;
+                    B.VisibilityMask = 1;
+                }
+                if (bDrawDebug && bDrawDebugRays)
+                {
+                    DrawDebugLine(GetWorld(), A.Points_1D_Array, B.Points_1D_Array, bClear ? FColor::Green : FColor::Red, /*bPersistentLines*/ DebugDrawDuration > 0.f, DebugDrawDuration, 0, DebugLineThickness);
+                }
+            }
+
+            // +Z neighbor: corresponding row in the next Z slice
+            if (ZIndex + 1 < SampleCountZ)
+            {
+                const int32 NextZRowIndex = CurrentRowIndex + SampleCountY;
+                FS_VolumeAnalysis_Point__Array &RowZ = PendingRows[NextZRowIndex];
+                FS_VolumeAnalysis_Point &B = RowZ.Points_1D_Array[xi];
+                const bool bClear = TraceBetween(A.Points_1D_Array, B.Points_1D_Array);
+                if (bClear)
+                {
+                    A.VisibilityMask = 1;
+                    B.VisibilityMask = 1;
+                }
+                if (bDrawDebug && bDrawDebugRays)
+                {
+                    DrawDebugLine(GetWorld(), A.Points_1D_Array, B.Points_1D_Array, bClear ? FColor::Green : FColor::Red, /*bPersistentLines*/ DebugDrawDuration > 0.f, DebugDrawDuration, 0, DebugLineThickness);
                 }
             }
         }
-
-        AnalysisResults.Add(MoveTemp(Row));
         ++CurrentRowIndex;
         ++RowsProcessed;
     }
@@ -225,18 +248,47 @@ void ACPP_AT_VolumeAnalysis_Base::ProcessRowsStep(int32 MaxRowsPerTick)
     if (CurrentRowIndex >= PendingRows.Num())
     {
         bIsRunning = false;
-        // Build a single combined result to broadcast
+        // Compute final counts from the grid
+        VisibleCount = 0;
+        HiddenCount = 0;
+        for (const FS_VolumeAnalysis_Point__Array &R : PendingRows)
+        {
+            for (const FS_VolumeAnalysis_Point &P : R.Points_1D_Array)
+            {
+                if (P.VisibilityMask)
+                {
+                    ++VisibleCount;
+                }
+                else
+                {
+                    ++HiddenCount;
+                }
+            }
+        }
+
+        // Persist results and build a combined array
+        AnalysisResults = PendingRows;
         FS_VolumeAnalysis_Point__Array Combined;
         int32 TotalPts = 0;
-        for (const FS_VolumeAnalysis_Point__Array &Row : AnalysisResults)
+        for (const FS_VolumeAnalysis_Point__Array &R : AnalysisResults)
         {
-            TotalPts += Row.Points_1D_Array.Num();
+            TotalPts += R.Points_1D_Array.Num();
         }
         Combined.Points_1D_Array.Reserve(TotalPts);
-        for (const FS_VolumeAnalysis_Point__Array &Row : AnalysisResults)
+        for (const FS_VolumeAnalysis_Point__Array &R : AnalysisResults)
         {
-            Combined.Points_1D_Array.Append(Row.Points_1D_Array);
+            Combined.Points_1D_Array.Append(R.Points_1D_Array);
         }
+
+        // Optional: draw points once with their final visibility
+        if (bDrawDebug && bDrawDebugPoints)
+        {
+            for (const FS_VolumeAnalysis_Point &P : Combined.Points_1D_Array)
+            {
+                DrawDebugPoint(GetWorld(), P.Points_1D_Array, DebugPointSize, P.VisibilityMask ? FColor::Green : FColor::Red, /*bPersistentLines*/ DebugDrawDuration > 0.f, DebugDrawDuration);
+            }
+        }
+
         UE_LOG(LogPVolActor, Display, TEXT("ProcessRowsStep: Complete; points=%d (Visible=%d Hidden=%d)"), Combined.Points_1D_Array.Num(), VisibleCount, HiddenCount);
         OnAnalysisComplete.Broadcast(Combined);
     }
