@@ -18,7 +18,7 @@
  * Delegate for broadcasting when Volume Analysis is complete
  * Allows other systems to react to finished analysis
  */
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnVolumeAnalysisComplete, FS_V3_1D__Array, AnalysisResultPoint);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnVolumeAnalysisComplete, FS_VolumeAnalysis_Point__Array, AnalysisResultPoint);
 
 /**
  * Main VolumeAnalysis Actor class
@@ -46,7 +46,7 @@ public:
 
     /** Contains a Minimum of 8 Points, Making a Cube Shape */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Initial")
-    FS_V3_1D__Array VolumePoints = FS_V3_1D__Array();
+    FS_VolumeAnalysis_Point__Array VolumePoints = FS_VolumeAnalysis_Point__Array();
 
     /** Number of samples along X axis inside the volume */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Sampling", meta = (ClampMin = "1", UIMin = "1"))
@@ -130,7 +130,7 @@ public:
 
     /** Get the current analysis results */
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Punal|VolumeAnalysis")
-    TArray<FS_V3_1D__Array> GetAnalysisResults();
+    TArray<FS_VolumeAnalysis_Point__Array> GetAnalysisResults();
 
     /** Get number of visible points in current analysis */
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Punal|VolumeAnalysis")
@@ -154,12 +154,12 @@ private:
     // INTERNAL DATA
     //////////////////////////////////////////////////////////////////////////
     // Store analysis results
-    TArray<FS_V3_1D__Array> AnalysisResults;
+    TArray<FS_VolumeAnalysis_Point__Array> AnalysisResults;
     int32 VisibleCount = 0;
     int32 HiddenCount = 0;
 
     // Generated rows to analyze this run
-    TArray<FS_V3_1D__Array> PendingRows;
+    TArray<FS_VolumeAnalysis_Point__Array> PendingRows;
     int32 CurrentRowIndex = 0;
     bool bIsRunning = false;
 

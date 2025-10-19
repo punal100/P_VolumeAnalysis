@@ -51,7 +51,7 @@ void UCPP_BPL__VolumeAnalysis::GenerateGridRowsInBox_ByCounts(
 	int32 CountX,
 	int32 CountY,
 	int32 CountZ,
-	TArray<FS_V3_1D__Array> &OutRows)
+	TArray<FS_VolumeAnalysis_Point__Array> &OutRows)
 {
 	OutRows.Reset();
 	if (!Box.IsValid || CountX <= 0 || CountY <= 0 || CountZ <= 0)
@@ -73,12 +73,15 @@ void UCPP_BPL__VolumeAnalysis::GenerateGridRowsInBox_ByCounts(
 		{
 			const float Y = Min.Y + yi * StepY;
 
-			FS_V3_1D__Array Row;
+			FS_VolumeAnalysis_Point__Array Row;
 			Row.Points_1D_Array.Reserve(CountX);
 			for (int32 xi = 0; xi < CountX; ++xi)
 			{
 				const float X = Min.X + xi * StepX;
-				Row.Points_1D_Array.Emplace(X, Y, Z);
+				FS_VolumeAnalysis_Point P;
+				P.Points_1D_Array = FVector(X, Y, Z);
+				P.VisibilityMask = 0;
+				Row.Points_1D_Array.Add(MoveTemp(P));
 			}
 			EnsureRowMaskSize(Row);
 			OutRows.Add(MoveTemp(Row));
@@ -86,12 +89,15 @@ void UCPP_BPL__VolumeAnalysis::GenerateGridRowsInBox_ByCounts(
 	}
 }
 
-void UCPP_BPL__VolumeAnalysis::EnsureRowMaskSize(FS_V3_1D__Array &Row)
+void UCPP_BPL__VolumeAnalysis::EnsureRowMaskSize(FS_VolumeAnalysis_Point__Array &Row)
 {
-	const int32 N = Row.Points_1D_Array.Num();
-	Row.VisibilityMask.SetNumUninitialized(N);
-	for (int32 i = 0; i < N; ++i)
+	// Nothing to resize; ensure each point has a defined mask
+	for (FS_VolumeAnalysis_Point &P : Row.Points_1D_Array)
 	{
-		Row.VisibilityMask[i] = 0; // default hidden
+		// Leave as-is; if uninitialized, set to 0
+		if (P.VisibilityMask != 0 && P.VisibilityMask != 1)
+		{
+			P.VisibilityMask = 0;
+		}
 	}
 }

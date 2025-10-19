@@ -11,22 +11,17 @@
 #include "Engine/EngineTypes.h"
 #include "CPP_BPL__VolumeAnalysis.generated.h"
 
-USTRUCT(BlueprintType)
-struct P_VOLUMEANALYSIS_API FS_V3_1D__Array
-{
-	GENERATED_BODY()
-
-public:
-	// Row
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Math|Point|Array")
-	TArray<FVector> Points_1D_Array;
-
-	// Optional: Visibility mask aligned with Points_1D_Array (1 = Visible, 0 = Hidden)
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Math|Point|Array")
-	TArray<uint8> VisibilityMask;
-};
-
 // Punal Manalan, NOTE: Not Required for For Volume Analysis but can be used in Future Extensions
+// USTRUCT(BlueprintType)
+// struct P_VOLUMEANALYSIS_API FS_V3_1D__Array
+// {
+// 		GENERATED_BODY()
+//
+// public:
+// 	// Row
+//		UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Math|Point|Array")
+//		TArray<FVector> Points_1D_Array;
+// };
 //  USTRUCT(BlueprintType)
 //  struct P_VOLUMEANALYSIS_API FS_V3_2D__Array
 //  {
@@ -46,6 +41,32 @@ public:
 //  	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Math|Point|Array")
 //  	TArray<FS_V3_2D__Array> Points_3D_Array;
 //  };
+
+USTRUCT(BlueprintType)
+struct P_VOLUMEANALYSIS_API FS_VolumeAnalysis_Point
+{
+	GENERATED_BODY()
+
+public:
+	// Row
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Math|Point")
+	FVector Points_1D_Array;
+
+	// Optional: Visibility mask aligned with Points_1D_Array (1 = Visible, 0 = Hidden)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Math|Point")
+	uint8 VisibilityMask;
+};
+
+USTRUCT(BlueprintType)
+struct P_VOLUMEANALYSIS_API FS_VolumeAnalysis_Point__Array
+{
+	GENERATED_BODY()
+
+public:
+	// Row
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Math|Point|Array")
+	TArray<FS_VolumeAnalysis_Point> Points_1D_Array;
+};
 
 /**
  *
@@ -72,8 +93,8 @@ public:
 		int32 CountX,
 		int32 CountY,
 		int32 CountZ,
-		TArray<FS_V3_1D__Array> &OutRows);
+		TArray<FS_VolumeAnalysis_Point__Array> &OutRows);
 
-	// Utility: Ensure a row's VisibilityMask matches its points length (filled with zeros)
-	static void EnsureRowMaskSize(FS_V3_1D__Array &Row);
+	// Utility: Ensure a row's points have initialized visibility masks
+	static void EnsureRowMaskSize(FS_VolumeAnalysis_Point__Array &Row);
 };

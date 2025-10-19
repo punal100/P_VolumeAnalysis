@@ -63,14 +63,22 @@ void ACPP_AT_VolumeAnalysis_Base::StartAnalysis()
     if (VolumePoints.Points_1D_Array.Num() < 2)
     {
         // Need at least two points to compute a valid box
+        UE_LOG(LogPVolActor, Warning, TEXT("StartAnalysis: Not enough input points: %d"), VolumePoints.Points_1D_Array.Num());
         bIsRunning = false;
         return;
     }
 
     // Compute axis-aligned bounding box from provided points
-    const FBox Box = UCPP_BPL__VolumeAnalysis::MakeBoxFromPoints(VolumePoints.Points_1D_Array);
+    TArray<FVector> TempPts;
+    TempPts.Reserve(VolumePoints.Points_1D_Array.Num());
+    for (const FS_VolumeAnalysis_Point &P : VolumePoints.Points_1D_Array)
+    {
+        TempPts.Add(P.Points_1D_Array);
+    }
+    const FBox Box = UCPP_BPL__VolumeAnalysis::MakeBoxFromPoints(TempPts);
     if (!Box.IsValid)
     {
+        UE_LOG(LogPVolActor, Warning, TEXT("StartAnalysis: Computed Box is invalid"));
         bIsRunning = false;
         return;
     }
@@ -80,6 +88,7 @@ void ACPP_AT_VolumeAnalysis_Base::StartAnalysis()
     UCPP_BPL__VolumeAnalysis::GenerateGridRowsInBox_ByCounts(Box, SampleCountX, SampleCountY, SampleCountZ, PendingRows);
     CurrentRowIndex = 0;
     bIsRunning = PendingRows.Num() > 0;
+    UE_LOG(LogPVolActor, Display, TEXT("StartAnalysis: Generated %d rows; Running=%s"), PendingRows.Num(), bIsRunning ? TEXT("true") : TEXT("false"));
 
     if (bDrawDebug && bDrawDebugBox)
     {
@@ -108,7 +117,7 @@ void ACPP_AT_VolumeAnalysis_Base::ClearResults()
     bIsRunning = false;
 }
 
-TArray<FS_V3_1D__Array> ACPP_AT_VolumeAnalysis_Base::GetAnalysisResults()
+TArray<FS_VolumeAnalysis_Point__Array> ACPP_AT_VolumeAnalysis_Base::GetAnalysisResults()
 {
     return AnalysisResults;
 }
@@ -141,6 +150,7 @@ void ACPP_AT_VolumeAnalysis_Base::ProcessRowsStep(int32 MaxRowsPerTick)
 {
     if (!GetWorld())
     {
+        UE_LOG(LogPVolActor, Warning, TEXT("ProcessRowsStep: No World"));
         bIsRunning = false;
         return;
     }
@@ -156,12 +166,12 @@ void ACPP_AT_VolumeAnalysis_Base::ProcessRowsStep(int32 MaxRowsPerTick)
     int32 RowsProcessed = 0;
     while (bIsRunning && RowsProcessed < MaxRowsPerTick && CurrentRowIndex < PendingRows.Num())
     {
-        FS_V3_1D__Array Row = PendingRows[CurrentRowIndex];
+        FS_VolumeAnalysis_Point__Array Row = PendingRows[CurrentRowIndex];
         UCPP_BPL__VolumeAnalysis::EnsureRowMaskSize(Row);
 
         for (int32 i = 0; i < Row.Points_1D_Array.Num(); ++i)
         {
-            const FVector Point = Row.Points_1D_Array[i];
+            const FVector Point = Row.Points_1D_Array[i].Points_1D_Array;
             FVector Start = Origin;
             FVector End = Point;
 
@@ -177,7 +187,7 @@ void ACPP_AT_VolumeAnalysis_Base::ProcessRowsStep(int32 MaxRowsPerTick)
             const bool bHit = GetWorld()->LineTraceSingleByChannel(Hit, Start, End, TraceChannel, QueryParams);
 
             const bool bVisible = !bHit || (Hit.bBlockingHit && Hit.GetActor() == this);
-            Row.VisibilityMask[i] = bVisible ? 1 : 0;
+            Row.Points_1D_Array[i].VisibilityMask = bVisible ? 1 : 0;
             if (bVisible)
             {
                 ++VisibleCount;
@@ -207,24 +217,27 @@ void ACPP_AT_VolumeAnalysis_Base::ProcessRowsStep(int32 MaxRowsPerTick)
     }
 
     // If done, broadcast and stop
+    if (bIsRunning && CurrentRowIndex < PendingRows.Num())
+    {
+        UE_LOG(LogPVolActor, VeryVerbose, TEXT("ProcessRowsStep: Progress Row=%d/%d"), CurrentRowIndex, PendingRows.Num());
+    }
+
     if (CurrentRowIndex >= PendingRows.Num())
     {
         bIsRunning = false;
         // Build a single combined result to broadcast
-        FS_V3_1D__Array Combined;
+        FS_VolumeAnalysis_Point__Array Combined;
         int32 TotalPts = 0;
-        for (const FS_V3_1D__Array &Row : AnalysisResults)
+        for (const FS_VolumeAnalysis_Point__Array &Row : AnalysisResults)
         {
             TotalPts += Row.Points_1D_Array.Num();
         }
         Combined.Points_1D_Array.Reserve(TotalPts);
-        Combined.VisibilityMask.Reserve(TotalPts);
-        for (const FS_V3_1D__Array &Row : AnalysisResults)
+        for (const FS_VolumeAnalysis_Point__Array &Row : AnalysisResults)
         {
             Combined.Points_1D_Array.Append(Row.Points_1D_Array);
-            Combined.VisibilityMask.Append(Row.VisibilityMask);
         }
-        UE_LOG(LogPVolActor, Display, TEXT("P_VolumeAnalysis: Broadcasting OnAnalysisComplete with %d points"), Combined.Points_1D_Array.Num());
+        UE_LOG(LogPVolActor, Display, TEXT("ProcessRowsStep: Complete; points=%d (Visible=%d Hidden=%d)"), Combined.Points_1D_Array.Num(), VisibleCount, HiddenCount);
         OnAnalysisComplete.Broadcast(Combined);
     }
 }
