@@ -91,6 +91,11 @@ void ACPP_AT_VolumeAnalysis_Base::StartAnalysis()
     GridCountY = SampleCountY;
     GridCountZ = SampleCountZ;
     UCPP_BPL__VolumeAnalysis::GenerateVoxelGridBoxes_ByCounts(Box, GridCountX, GridCountY, GridCountZ, PendingBoxes);
+    // Cache cell sizes for overlap radius auto scaling
+    const FVector Extent = Box.GetExtent();
+    CellSizeX = (GridCountX > 0) ? (Extent.X * 2.f / GridCountX) : 0.f;
+    CellSizeY = (GridCountY > 0) ? (Extent.Y * 2.f / GridCountY) : 0.f;
+    CellSizeZ = (GridCountZ > 0) ? (Extent.Z * 2.f / GridCountZ) : 0.f;
     CurrentCellIndex = 0;
     bIsSubSampling = false;
     HiddenBoxIndices.Reset();
@@ -122,6 +127,9 @@ void ACPP_AT_VolumeAnalysis_Base::ClearResults()
     HiddenCount = 0;
     PendingBoxes.Reset();
     CurrentCellIndex = 0;
+    bIsSubSampling = false;
+    HiddenBoxIndices.Reset();
+    CurrentHiddenIndex = 0;
     bIsRunning = false;
 }
 
@@ -169,6 +177,14 @@ void ACPP_AT_VolumeAnalysis_Base::ProcessRowsStep(int32 MaxRowsPerTick)
         QueryParams.AddIgnoredActor(this);
     }
 
+    // If we're in sub-sampling mode, prioritize refining hidden boxes
+    if (bIsSubSampling)
+    {
+        UE_LOG(LogPVolActor, VeryVerbose, TEXT("ProcessRowsStep: Entering SubSampling phase with %d remaining"), HiddenBoxIndices.Num() - CurrentHiddenIndex);
+        ProcessRowsStep_SubSampling(MaxRowsPerTick, QueryParams);
+        return;
+    }
+
     auto GetCenter = [&](const FS_LinkedBox &Box) -> FVector
     {
         return UCPP_BPL__VolumeAnalysis::LinkedBox_GetCenter(Box);
@@ -197,13 +213,45 @@ void ACPP_AT_VolumeAnalysis_Base::ProcessRowsStep(int32 MaxRowsPerTick)
             return !bHit; // true if clear path
         };
 
+        auto IsCenterFree = [&](const FVector &C) -> bool
+        {
+            if (!bUseCenterOverlapTest)
+            {
+                return true;
+            }
+            const float AutoR = 0.25f * FMath::Max(0.001f, FMath::Min3(CellSizeX, CellSizeY, CellSizeZ));
+            const float Radius = (CenterOverlapRadius > 0.f) ? CenterOverlapRadius : AutoR;
+            // SphereOverlap returns actors; we can use a collision query via Sweep with a small sphere
+            FCollisionShape Shape = FCollisionShape::MakeSphere(Radius);
+            FHitResult Hit;
+            const bool bHit = GetWorld()->SweepSingleByChannel(Hit, C, C, FQuat::Identity, TraceChannel, Shape, QueryParams);
+            return !bHit;
+        };
+
         // +X neighbor
         if (XIndex + 1 < GridCountX)
         {
             FS_LinkedBox &BBox = PendingBoxes[Index(XIndex + 1, YIndex, ZIndex)];
             const FVector BC = GetCenter(BBox);
             const bool bClear = TraceBetween(AC, BC);
-            if (bClear)
+            if (bClear && IsCenterFree(AC) && IsCenterFree(BC))
+            {
+                ABox.VisibilityMask = 1;
+                BBox.VisibilityMask = 1;
+            }
+            if (bDrawDebug && bDrawDebugRays)
+            {
+                DrawDebugLine(GetWorld(), AC, BC, bClear ? FColor::Green : FColor::Red, DebugDrawDuration > 0.f, DebugDrawDuration, 0, DebugLineThickness);
+            }
+        }
+
+        // -X neighbor
+        if (XIndex - 1 >= 0)
+        {
+            FS_LinkedBox &BBox = PendingBoxes[Index(XIndex - 1, YIndex, ZIndex)];
+            const FVector BC = GetCenter(BBox);
+            const bool bClear = TraceBetween(AC, BC);
+            if (bClear && IsCenterFree(AC) && IsCenterFree(BC))
             {
                 ABox.VisibilityMask = 1;
                 BBox.VisibilityMask = 1;
@@ -220,7 +268,24 @@ void ACPP_AT_VolumeAnalysis_Base::ProcessRowsStep(int32 MaxRowsPerTick)
             FS_LinkedBox &BBox = PendingBoxes[Index(XIndex, YIndex + 1, ZIndex)];
             const FVector BC = GetCenter(BBox);
             const bool bClear = TraceBetween(AC, BC);
-            if (bClear)
+            if (bClear && IsCenterFree(AC) && IsCenterFree(BC))
+            {
+                ABox.VisibilityMask = 1;
+                BBox.VisibilityMask = 1;
+            }
+            if (bDrawDebug && bDrawDebugRays)
+            {
+                DrawDebugLine(GetWorld(), AC, BC, bClear ? FColor::Green : FColor::Red, DebugDrawDuration > 0.f, DebugDrawDuration, 0, DebugLineThickness);
+            }
+        }
+
+        // -Y neighbor
+        if (YIndex - 1 >= 0)
+        {
+            FS_LinkedBox &BBox = PendingBoxes[Index(XIndex, YIndex - 1, ZIndex)];
+            const FVector BC = GetCenter(BBox);
+            const bool bClear = TraceBetween(AC, BC);
+            if (bClear && IsCenterFree(AC) && IsCenterFree(BC))
             {
                 ABox.VisibilityMask = 1;
                 BBox.VisibilityMask = 1;
@@ -237,7 +302,24 @@ void ACPP_AT_VolumeAnalysis_Base::ProcessRowsStep(int32 MaxRowsPerTick)
             FS_LinkedBox &BBox = PendingBoxes[Index(XIndex, YIndex, ZIndex + 1)];
             const FVector BC = GetCenter(BBox);
             const bool bClear = TraceBetween(AC, BC);
-            if (bClear)
+            if (bClear && IsCenterFree(AC) && IsCenterFree(BC))
+            {
+                ABox.VisibilityMask = 1;
+                BBox.VisibilityMask = 1;
+            }
+            if (bDrawDebug && bDrawDebugRays)
+            {
+                DrawDebugLine(GetWorld(), AC, BC, bClear ? FColor::Green : FColor::Red, DebugDrawDuration > 0.f, DebugDrawDuration, 0, DebugLineThickness);
+            }
+        }
+
+        // -Z neighbor
+        if (ZIndex - 1 >= 0)
+        {
+            FS_LinkedBox &BBox = PendingBoxes[Index(XIndex, YIndex, ZIndex - 1)];
+            const FVector BC = GetCenter(BBox);
+            const bool bClear = TraceBetween(AC, BC);
+            if (bClear && IsCenterFree(AC) && IsCenterFree(BC))
             {
                 ABox.VisibilityMask = 1;
                 BBox.VisibilityMask = 1;
@@ -265,21 +347,43 @@ void ACPP_AT_VolumeAnalysis_Base::ProcessRowsStep(int32 MaxRowsPerTick)
         {
             HiddenBoxIndices.Reset();
             HiddenBoxIndices.Reserve(PendingBoxes.Num());
+            int32 TmpVisible = 0;
+            int32 TmpHidden = 0;
             for (int32 i = 0; i < PendingBoxes.Num(); ++i)
             {
                 if (PendingBoxes[i].VisibilityMask == 0)
                 {
                     HiddenBoxIndices.Add(i);
                 }
+                else
+                {
+                    ++TmpVisible;
+                }
             }
+            TmpHidden = HiddenBoxIndices.Num();
             bIsSubSampling = HiddenBoxIndices.Num() > 0;
             CurrentHiddenIndex = 0;
             if (bIsSubSampling)
             {
-                UE_LOG(LogPVolActor, Display, TEXT("SubSampling: %d hidden boxes to refine"), HiddenBoxIndices.Num());
+                // Ensure we remain running for sub-sampling
+                bIsRunning = true;
+                CurrentCellIndex = PendingBoxes.Num();
+                UE_LOG(LogPVolActor, Display, TEXT("SubSampling: %d hidden boxes to refine (Visible after main=%d, Hidden=%d)"), HiddenBoxIndices.Num(), TmpVisible, TmpHidden);
                 // proceed immediately into sub-sampling this tick using remaining budget
-                ProcessRowsStep_SubSampling(MaxRowsPerTick - CellsProcessed, QueryParams);
+                const int32 Remaining = MaxRowsPerTick - CellsProcessed;
+                if (Remaining > 0)
+                {
+                    ProcessRowsStep_SubSampling(Remaining, QueryParams);
+                }
+                else
+                {
+                    UE_LOG(LogPVolActor, VeryVerbose, TEXT("SubSampling: Deferring to next tick (no remaining budget)"));
+                }
                 return;
+            }
+            else
+            {
+                UE_LOG(LogPVolActor, Display, TEXT("SubSampling: Skipped (no hidden boxes). Main pass: Visible=%d Hidden=%d; bEnableSubSampling=%s"), TmpVisible, TmpHidden, bEnableSubSampling ? TEXT("true") : TEXT("false"));
             }
         }
 
@@ -323,7 +427,15 @@ void ACPP_AT_VolumeAnalysis_Base::ProcessRowsStep(int32 MaxRowsPerTick)
     // If main pass still running or we have transitioned into sub-sampling, continue sub-sampling if needed
     if (bIsSubSampling)
     {
-        ProcessRowsStep_SubSampling(MaxRowsPerTick - CellsProcessed, QueryParams);
+        const int32 Remaining = MaxRowsPerTick - CellsProcessed;
+        if (Remaining > 0)
+        {
+            ProcessRowsStep_SubSampling(Remaining, QueryParams);
+        }
+        else
+        {
+            UE_LOG(LogPVolActor, VeryVerbose, TEXT("SubSampling: Skipped this tick (no remaining budget)"));
+        }
     }
 }
 
@@ -352,6 +464,20 @@ void ACPP_AT_VolumeAnalysis_Base::ProcessRowsStep_SubSampling(int32 MaxCellsPerT
         return !bHit; // true if clear path
     };
 
+    auto IsCenterFree = [&](const FVector &C) -> bool
+    {
+        if (!bUseCenterOverlapTest)
+        {
+            return true;
+        }
+        const float AutoR = 0.25f * FMath::Max(0.001f, FMath::Min3(CellSizeX, CellSizeY, CellSizeZ));
+        const float Radius = (CenterOverlapRadius > 0.f) ? CenterOverlapRadius : AutoR;
+        FCollisionShape Shape = FCollisionShape::MakeSphere(Radius);
+        FHitResult Hit;
+        const bool bHit = GetWorld()->SweepSingleByChannel(Hit, C, C, FQuat::Identity, TraceChannel, Shape, QueryParams);
+        return !bHit;
+    };
+
     int32 RefinedThisTick = 0;
     while (bIsRunning && RefinedThisTick < MaxCellsPerTick && CurrentHiddenIndex < HiddenBoxIndices.Num())
     {
@@ -367,41 +493,61 @@ void ACPP_AT_VolumeAnalysis_Base::ProcessRowsStep_SubSampling(int32 MaxCellsPerT
         const FBox BoxAABB = UCPP_BPL__VolumeAnalysis::LinkedBox_GetAABB(Box);
         TArray<FS_LinkedBox> SubVoxels;
         UCPP_BPL__VolumeAnalysis::GenerateVoxelGridBoxes_ByCounts(BoxAABB, SubSampleCountX, SubSampleCountY, SubSampleCountZ, SubVoxels);
+        if (bDrawDebug && bDrawDebugSubBoxes)
+        {
+            for (const FS_LinkedBox &SV : SubVoxels)
+            {
+                const FBox SVBox = UCPP_BPL__VolumeAnalysis::LinkedBox_GetAABB(SV);
+                DrawAABB(SVBox, FColor(0, 255, 255)); // cyan sub-box wireframes
+            }
+        }
 
         bool bAnyVisible = false;
-        // Use neighboring main-grid centers as references: collect +X/+Y/+Z if exist
-        const int32 ZIndex = BoxIdx / (GridCountY * GridCountX);
-        const int32 Rem = BoxIdx % (GridCountY * GridCountX);
-        const int32 YIndex = Rem / GridCountX;
-        const int32 XIndex = Rem % GridCountX;
-
-        TArray<FVector> NeighborCenters;
-        NeighborCenters.Reserve(3);
-        if (XIndex + 1 < GridCountX)
-            NeighborCenters.Add(GetCenter(PendingBoxes[Index(XIndex + 1, YIndex, ZIndex)]));
-        if (YIndex + 1 < GridCountY)
-            NeighborCenters.Add(GetCenter(PendingBoxes[Index(XIndex, YIndex + 1, ZIndex)]));
-        if (ZIndex + 1 < GridCountZ)
-            NeighborCenters.Add(GetCenter(PendingBoxes[Index(XIndex, YIndex, ZIndex + 1)]));
-
-        for (const FS_LinkedBox &Sub : SubVoxels)
+        // Refine using internal sub-voxel neighbor connectivity inside the parent sample
+        const auto IndexSub = [&](int32 X, int32 Y, int32 Z) -> int32
         {
-            const FVector SC = GetCenter(Sub);
-            for (const FVector &NC : NeighborCenters)
+            return Z * (SubSampleCountY * SubSampleCountX) + Y * SubSampleCountX + X;
+        };
+
+        for (int32 z = 0; z < SubSampleCountZ; ++z)
+        {
+            for (int32 y = 0; y < SubSampleCountY; ++y)
             {
-                const bool bClear = TraceBetween(SC, NC);
-                if (bDrawDebug && bDrawDebugRays)
+                for (int32 x = 0; x < SubSampleCountX; ++x)
                 {
-                    DrawDebugLine(GetWorld(), SC, NC, bClear ? FColor::Green : FColor::Red, DebugDrawDuration > 0.f, DebugDrawDuration, 0, DebugLineThickness * 0.75f);
-                }
-                if (bClear)
-                {
-                    bAnyVisible = true;
-                    break;
+                    const FS_LinkedBox &Sub = SubVoxels[IndexSub(x, y, z)];
+                    const FVector SC = GetCenter(Sub);
+
+                    auto CheckNeighbor = [&](int32 nx, int32 ny, int32 nz)
+                    {
+                        const FS_LinkedBox &NSub = SubVoxels[IndexSub(nx, ny, nz)];
+                        const FVector NC = GetCenter(NSub);
+                        const bool bClear = TraceBetween(SC, NC);
+                        if (bDrawDebug && bDrawDebugRays)
+                        {
+                            DrawDebugLine(GetWorld(), SC, NC, bClear ? FColor::Cyan : FColor::Red, DebugDrawDuration > 0.f, DebugDrawDuration, 0, DebugLineThickness * 0.6f);
+                        }
+                        if (bClear && IsCenterFree(SC) && IsCenterFree(NC))
+                        {
+                            bAnyVisible = true;
+                        }
+                    };
+
+                    // 6-neighborhood (±X, ±Y, ±Z) inside the parent sample
+                    if (x + 1 < SubSampleCountX)
+                        CheckNeighbor(x + 1, y, z);
+                    if (x - 1 >= 0)
+                        CheckNeighbor(x - 1, y, z);
+                    if (y + 1 < SubSampleCountY)
+                        CheckNeighbor(x, y + 1, z);
+                    if (y - 1 >= 0)
+                        CheckNeighbor(x, y - 1, z);
+                    if (z + 1 < SubSampleCountZ)
+                        CheckNeighbor(x, y, z + 1);
+                    if (z - 1 >= 0)
+                        CheckNeighbor(x, y, z - 1);
                 }
             }
-            if (bAnyVisible)
-                break;
         }
 
         if (bAnyVisible)

@@ -88,6 +88,10 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Debug")
     bool bDrawDebugPoints = true;
 
+    /** Draw sub-sample boxes for hidden samples during sub-sampling */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Debug")
+    bool bDrawDebugSubBoxes = false;
+
     /** Size of debug points */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Debug", meta = (ClampMin = "0", UIMin = "0"))
     float DebugPointSize = 6.f;
@@ -103,6 +107,14 @@ public:
     /** Number of rows to process per tick (higher = faster but may hitch) */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Performance", meta = (ClampMin = "1", UIMin = "1"))
     int32 RowsPerTick = 8;
+
+    /** Treat voxel centers overlapping blocking geometry as hidden; if true, a voxel must have a free center AND a clear neighbor trace to be visible */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Visibility")
+    bool bUseCenterOverlapTest = true;
+
+    /** Overlap radius at voxel centers; <= 0 means auto from cell size (25% of the smallest axis) */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Visibility", meta = (ClampMin = "0.0", UIMin = "0.0"))
+    float CenterOverlapRadius = 0.0f;
 
     //////////////////////////////////////////////////////////////////////////
     // SUB-SAMPLING (refine only boxes still hidden after the main pass)
@@ -184,6 +196,11 @@ private:
     int32 GridCountX = 0;
     int32 GridCountY = 0;
     int32 GridCountZ = 0;
+
+    // Cached approximate cell sizes (computed at StartAnalysis for auto radius)
+    float CellSizeX = 0.f;
+    float CellSizeY = 0.f;
+    float CellSizeZ = 0.f;
 
     // Sub-sampling phase state
     bool bIsSubSampling = false;
