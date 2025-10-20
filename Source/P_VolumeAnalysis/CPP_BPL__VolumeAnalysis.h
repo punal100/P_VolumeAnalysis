@@ -11,6 +11,19 @@
 #include "Engine/EngineTypes.h"
 #include "CPP_BPL__VolumeAnalysis.generated.h"
 
+UENUM(BlueprintType)
+enum class EE_Box_8Point : uint8
+{
+	Top_Forward_Right UMETA(DisplayName = "Top Forward Right"),
+	Top_Forward_Left UMETA(DisplayName = "Top Forward Left"),
+	Top_Backward_Right UMETA(DisplayName = "Top Backward Right"),
+	Top_Backward_Left UMETA(DisplayName = "Top Backward Left"),
+	Bottom_Forward_Right UMETA(DisplayName = "Bottom Forward Right"),
+	Bottom_Forward_Left UMETA(DisplayName = "Bottom Forward Left"),
+	Bottom_Backward_Right UMETA(DisplayName = "Bottom Backward Right"),
+	Bottom_Backward_Left UMETA(DisplayName = "Bottom Backward Left")
+};
+
 // Punal Manalan, NOTE: Not Required for For Volume Analysis but can be used in Future Extensions
 // USTRUCT(BlueprintType)
 // struct P_VOLUMEANALYSIS_API FS_V3_1D__Array
@@ -50,7 +63,7 @@ struct P_VOLUMEANALYSIS_API FS_VolumeAnalysis_Point
 public:
 	// Row
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Math|Point")
-	FVector Points_1D_Array;
+	FVector Point;
 
 	// Optional: Visibility mask aligned with Points_1D_Array (1 = Visible, 0 = Hidden)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Math|Point")
@@ -67,7 +80,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Math|Point|Array")
 	TArray<FS_VolumeAnalysis_Point> Points_1D_Array;
 };
-
 /**
  *
  */

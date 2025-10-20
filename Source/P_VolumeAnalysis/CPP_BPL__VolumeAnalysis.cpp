@@ -79,7 +79,7 @@ void UCPP_BPL__VolumeAnalysis::GenerateGridRowsInBox_ByCounts(
 			{
 				const float X = Min.X + xi * StepX;
 				FS_VolumeAnalysis_Point P;
-				P.Points_1D_Array = FVector(X, Y, Z);
+				P.Point = FVector(X, Y, Z);
 				P.VisibilityMask = 0;
 				Row.Points_1D_Array.Add(MoveTemp(P));
 			}

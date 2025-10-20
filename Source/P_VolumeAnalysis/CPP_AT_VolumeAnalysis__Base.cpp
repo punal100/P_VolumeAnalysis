@@ -73,7 +73,7 @@ void ACPP_AT_VolumeAnalysis_Base::StartAnalysis()
     TempPts.Reserve(VolumePoints.Points_1D_Array.Num());
     for (const FS_VolumeAnalysis_Point &P : VolumePoints.Points_1D_Array)
     {
-        TempPts.Add(P.Points_1D_Array);
+        TempPts.Add(P.Point);
     }
     const FBox Box = UCPP_BPL__VolumeAnalysis::MakeBoxFromPoints(TempPts);
     if (!Box.IsValid)
@@ -188,7 +188,7 @@ void ACPP_AT_VolumeAnalysis_Base::ProcessRowsStep(int32 MaxRowsPerTick)
             if (xi + 1 < SampleCountX)
             {
                 FS_VolumeAnalysis_Point &B = Row.Points_1D_Array[xi + 1];
-                const bool bClear = TraceBetween(A.Points_1D_Array, B.Points_1D_Array);
+                const bool bClear = TraceBetween(A.Point, B.Point);
                 if (bClear)
                 {
                     A.VisibilityMask = 1;
@@ -196,7 +196,7 @@ void ACPP_AT_VolumeAnalysis_Base::ProcessRowsStep(int32 MaxRowsPerTick)
                 }
                 if (bDrawDebug && bDrawDebugRays)
                 {
-                    DrawDebugLine(GetWorld(), A.Points_1D_Array, B.Points_1D_Array, bClear ? FColor::Green : FColor::Red, /*bPersistentLines*/ DebugDrawDuration > 0.f, DebugDrawDuration, 0, DebugLineThickness);
+                    DrawDebugLine(GetWorld(), A.Point, B.Point, bClear ? FColor::Green : FColor::Red, /*bPersistentLines*/ DebugDrawDuration > 0.f, DebugDrawDuration, 0, DebugLineThickness);
                 }
             }
 
@@ -205,7 +205,7 @@ void ACPP_AT_VolumeAnalysis_Base::ProcessRowsStep(int32 MaxRowsPerTick)
             {
                 FS_VolumeAnalysis_Point__Array &RowY = PendingRows[CurrentRowIndex + 1];
                 FS_VolumeAnalysis_Point &B = RowY.Points_1D_Array[xi];
-                const bool bClear = TraceBetween(A.Points_1D_Array, B.Points_1D_Array);
+                const bool bClear = TraceBetween(A.Point, B.Point);
                 if (bClear)
                 {
                     A.VisibilityMask = 1;
@@ -213,7 +213,7 @@ void ACPP_AT_VolumeAnalysis_Base::ProcessRowsStep(int32 MaxRowsPerTick)
                 }
                 if (bDrawDebug && bDrawDebugRays)
                 {
-                    DrawDebugLine(GetWorld(), A.Points_1D_Array, B.Points_1D_Array, bClear ? FColor::Green : FColor::Red, /*bPersistentLines*/ DebugDrawDuration > 0.f, DebugDrawDuration, 0, DebugLineThickness);
+                    DrawDebugLine(GetWorld(), A.Point, B.Point, bClear ? FColor::Green : FColor::Red, /*bPersistentLines*/ DebugDrawDuration > 0.f, DebugDrawDuration, 0, DebugLineThickness);
                 }
             }
 
@@ -223,7 +223,7 @@ void ACPP_AT_VolumeAnalysis_Base::ProcessRowsStep(int32 MaxRowsPerTick)
                 const int32 NextZRowIndex = CurrentRowIndex + SampleCountY;
                 FS_VolumeAnalysis_Point__Array &RowZ = PendingRows[NextZRowIndex];
                 FS_VolumeAnalysis_Point &B = RowZ.Points_1D_Array[xi];
-                const bool bClear = TraceBetween(A.Points_1D_Array, B.Points_1D_Array);
+                const bool bClear = TraceBetween(A.Point, B.Point);
                 if (bClear)
                 {
                     A.VisibilityMask = 1;
@@ -231,7 +231,7 @@ void ACPP_AT_VolumeAnalysis_Base::ProcessRowsStep(int32 MaxRowsPerTick)
                 }
                 if (bDrawDebug && bDrawDebugRays)
                 {
-                    DrawDebugLine(GetWorld(), A.Points_1D_Array, B.Points_1D_Array, bClear ? FColor::Green : FColor::Red, /*bPersistentLines*/ DebugDrawDuration > 0.f, DebugDrawDuration, 0, DebugLineThickness);
+                    DrawDebugLine(GetWorld(), A.Point, B.Point, bClear ? FColor::Green : FColor::Red, /*bPersistentLines*/ DebugDrawDuration > 0.f, DebugDrawDuration, 0, DebugLineThickness);
                 }
             }
         }
@@ -285,7 +285,7 @@ void ACPP_AT_VolumeAnalysis_Base::ProcessRowsStep(int32 MaxRowsPerTick)
         {
             for (const FS_VolumeAnalysis_Point &P : Combined.Points_1D_Array)
             {
-                DrawDebugPoint(GetWorld(), P.Points_1D_Array, DebugPointSize, P.VisibilityMask ? FColor::Green : FColor::Red, /*bPersistentLines*/ DebugDrawDuration > 0.f, DebugDrawDuration);
+                DrawDebugPoint(GetWorld(), P.Point, DebugPointSize, P.VisibilityMask ? FColor::Green : FColor::Red, /*bPersistentLines*/ DebugDrawDuration > 0.f, DebugDrawDuration);
             }
         }
 
