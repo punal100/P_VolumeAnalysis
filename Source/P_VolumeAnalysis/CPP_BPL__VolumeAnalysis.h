@@ -54,32 +54,76 @@ enum class EE_Box_8Point : uint8
 //  	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Math|Point|Array")
 //  	TArray<FS_V3_2D__Array> Points_3D_Array;
 //  };
+// Legacy point-based structs omitted; replaced by FS_LinkedBox voxel boxes.
 
 USTRUCT(BlueprintType)
-struct P_VOLUMEANALYSIS_API FS_VolumeAnalysis_Point
+struct P_VOLUMEANALYSIS_API FS_LinkedSharedPoint
+{
+	GENERATED_BODY()
+
+public:
+	TSharedPtr<FVector> Point;
+
+	FVector GetPoint() const
+	{
+		return Point.IsValid() ? *Point : FVector::ZeroVector;
+	}
+
+	void SetPoint(const FVector &NewPoint)
+	{
+		if (Point.IsValid())
+		{
+			*Point = NewPoint;
+		}
+		else
+		{
+			Point = MakeShared<FVector>(NewPoint);
+		}
+	}
+
+	bool IsSharedPointValid() const
+	{
+		return Point.IsValid();
+	}
+};
+
+USTRUCT(BlueprintType)
+struct P_VOLUMEANALYSIS_API FS_LinkedBox
 {
 	GENERATED_BODY()
 
 public:
 	// Row
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Math|Point")
-	FVector Point;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Math|LinkedBox")
+	TMap<EE_Box_8Point, FS_LinkedSharedPoint> Points;
 
 	// Optional: Visibility mask aligned with Points_1D_Array (1 = Visible, 0 = Hidden)
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Math|Point")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Math|LinkedBox")
 	uint8 VisibilityMask;
+
+	void SetBoxPoint(EE_Box_8Point Corner, const FVector &NewPoint)
+	{
+		if (Points.Contains(Corner))
+		{
+			Points[Corner].SetPoint(NewPoint);
+		}
+		else
+		{
+			FS_LinkedSharedPoint NewSharedPoint;
+			NewSharedPoint.SetPoint(NewPoint);
+			Points.Add(Corner, NewSharedPoint);
+		}
+	}
+
+	static void LinkTwoBoxPoint(FS_LinkedBox &BoxA, FS_LinkedBox &BoxB, EE_Box_8Point BoxA_Corner, EE_Box_8Point BoxB_Corner)
+	{
+		if (BoxA.Points.Contains(BoxA_Corner) && BoxB.Points.Contains(BoxB_Corner))
+		{
+			BoxA.Points[BoxA_Corner].Point = BoxB.Points[BoxB_Corner].Point;
+		}
+	}
 };
 
-USTRUCT(BlueprintType)
-struct P_VOLUMEANALYSIS_API FS_VolumeAnalysis_Point__Array
-{
-	GENERATED_BODY()
-
-public:
-	// Row
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Math|Point|Array")
-	TArray<FS_VolumeAnalysis_Point> Points_1D_Array;
-};
 /**
  *
  */
@@ -99,14 +143,36 @@ public:
 	// Compute axis-aligned bounding box from a set of points
 	static FBox MakeBoxFromPoints(const TArray<FVector> &Points);
 
-	// Generate 3D grid rows across X for each Y,Z within the given box using counts per axis
-	static void GenerateGridRowsInBox_ByCounts(
+	// Generate a voxel grid of boxes within the AABB using counts per axis
+	static void GenerateVoxelGridBoxes_ByCounts(
 		const FBox &Box,
 		int32 CountX,
 		int32 CountY,
 		int32 CountZ,
-		TArray<FS_VolumeAnalysis_Point__Array> &OutRows);
+		TArray<FS_LinkedBox> &OutBoxes);
 
-	// Utility: Ensure a row's points have initialized visibility masks
-	static void EnsureRowMaskSize(FS_VolumeAnalysis_Point__Array &Row);
+	// Utility: Get center of a linked box (averaging available corners; falls back to AABB center of valid points)
+	UFUNCTION(BlueprintPure, Category = "Punal|VolumeAnalysis|LinkedBox")
+	static FVector LinkedBox_GetCenter(const FS_LinkedBox &InBox);
+
+	// Utility: Compute AABB from a linked box's valid corners
+	UFUNCTION(BlueprintPure, Category = "Punal|VolumeAnalysis|LinkedBox")
+	static FBox LinkedBox_GetAABB(const FS_LinkedBox &InBox);
+
+	// Utility: FS_LinkedSharedPoint Blueprint wrappers
+	UFUNCTION(BlueprintCallable, Category = "Punal|VolumeAnalysis|LinkedSharedPoint")
+	static FVector LinkedSharedPoint_GetPoint(const FS_LinkedSharedPoint &InSharedPoint);
+
+	UFUNCTION(BlueprintCallable, Category = "Punal|VolumeAnalysis|LinkedSharedPoint")
+	static void LinkedSharedPoint_SetPoint(UPARAM(ref) FS_LinkedSharedPoint &InSharedPoint, const FVector &NewPoint);
+
+	UFUNCTION(BlueprintPure, Category = "Punal|VolumeAnalysis|LinkedSharedPoint")
+	static bool LinkedSharedPoint_IsValid(const FS_LinkedSharedPoint &InSharedPoint);
+
+	// Utility: FS_LinkedBox Blueprint wrappers
+	UFUNCTION(BlueprintCallable, Category = "Punal|VolumeAnalysis|LinkedBox")
+	static void LinkedBox_SetBoxPoint(UPARAM(ref) FS_LinkedBox &InOutBox, EE_Box_8Point Corner, const FVector &NewPoint);
+
+	UFUNCTION(BlueprintCallable, Category = "Punal|VolumeAnalysis|LinkedBox")
+	static void LinkedBox_LinkTwoBoxPoint(UPARAM(ref) FS_LinkedBox &BoxA, UPARAM(ref) FS_LinkedBox &BoxB, EE_Box_8Point BoxA_Corner, EE_Box_8Point BoxB_Corner);
 };

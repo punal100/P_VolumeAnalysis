@@ -18,7 +18,7 @@
  * Delegate for broadcasting when Volume Analysis is complete
  * Allows other systems to react to finished analysis
  */
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnVolumeAnalysisComplete, FS_VolumeAnalysis_Point__Array, AnalysisResultPoint);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnVolumeAnalysisComplete, const TArray<FS_LinkedBox> &, AnalysisResultBoxes);
 
 /**
  * Main VolumeAnalysis Actor class
@@ -44,9 +44,9 @@ public:
     // CORE VOLUME ANALYSIS PROPERTIES
     //////////////////////////////////////////////////////////////////////////
 
-    /** Contains a Minimum of 8 Points, Making a Cube Shape */
+    /** Defines the analysis volume via its 8 linked corners (at least 2 valid points required to build an AABB) */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Initial")
-    FS_VolumeAnalysis_Point__Array VolumePoints = FS_VolumeAnalysis_Point__Array();
+    FS_LinkedBox VolumeBox = FS_LinkedBox();
 
     /** Number of samples along X axis inside the volume */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|Sampling", meta = (ClampMin = "1", UIMin = "1"))
@@ -105,6 +105,23 @@ public:
     int32 RowsPerTick = 8;
 
     //////////////////////////////////////////////////////////////////////////
+    // SUB-SAMPLING (refine only boxes still hidden after the main pass)
+    //////////////////////////////////////////////////////////////////////////
+    /** Enable a secondary sub-sampling pass that only runs for boxes remaining hidden */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|SubSampling")
+    bool bEnableSubSampling = true;
+
+    /** Sub-sample counts per axis inside each hidden box */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|SubSampling", meta = (ClampMin = "1", UIMin = "1"))
+    int32 SubSampleCountX = 2;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|SubSampling", meta = (ClampMin = "1", UIMin = "1"))
+    int32 SubSampleCountY = 2;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Punal|VolumeAnalysis|SubSampling", meta = (ClampMin = "1", UIMin = "1"))
+    int32 SubSampleCountZ = 2;
+
+    //////////////////////////////////////////////////////////////////////////
     // EVENTS
     //////////////////////////////////////////////////////////////////////////
 
@@ -128,9 +145,9 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Punal|VolumeAnalysis")
     void ClearResults();
 
-    /** Get the current analysis results */
+    /** Get the current analysis results (flat array of voxel boxes) */
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Punal|VolumeAnalysis")
-    TArray<FS_VolumeAnalysis_Point__Array> GetAnalysisResults();
+    TArray<FS_LinkedBox> GetAnalysisResults();
 
     /** Get number of visible points in current analysis */
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Punal|VolumeAnalysis")
@@ -153,18 +170,29 @@ private:
     //////////////////////////////////////////////////////////////////////////
     // INTERNAL DATA
     //////////////////////////////////////////////////////////////////////////
-    // Store analysis results
-    TArray<FS_VolumeAnalysis_Point__Array> AnalysisResults;
+    // Store analysis results (voxel boxes)
+    TArray<FS_LinkedBox> AnalysisResults;
     int32 VisibleCount = 0;
     int32 HiddenCount = 0;
 
-    // Generated rows to analyze this run
-    TArray<FS_VolumeAnalysis_Point__Array> PendingRows;
-    int32 CurrentRowIndex = 0;
+    // Generated voxel boxes to analyze this run (flattened Z-Y-X order)
+    TArray<FS_LinkedBox> PendingBoxes;
+    int32 CurrentCellIndex = 0;
     bool bIsRunning = false;
+
+    // Cached grid extents for neighbor lookup
+    int32 GridCountX = 0;
+    int32 GridCountY = 0;
+    int32 GridCountZ = 0;
+
+    // Sub-sampling phase state
+    bool bIsSubSampling = false;
+    TArray<int32> HiddenBoxIndices;
+    int32 CurrentHiddenIndex = 0;
 
     // Internal: process a portion of rows each tick to avoid hitching
     void ProcessRowsStep(int32 MaxRowsPerTick);
+    void ProcessRowsStep_SubSampling(int32 MaxCellsPerTick, const FCollisionQueryParams &QueryParams);
 
     // Internal: draw an AABB
     void DrawAABB(const FBox &Box, const FColor &Color) const;
