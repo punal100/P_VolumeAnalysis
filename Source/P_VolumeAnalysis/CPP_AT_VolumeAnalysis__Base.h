@@ -207,6 +207,13 @@ private:
     TArray<int32> HiddenBoxIndices;
     int32 CurrentHiddenIndex = 0;
 
+    // Main-pass multi-axis scan state
+    // Phase 0 = X-rows (GridCountY * GridCountZ)
+    // Phase 1 = Y-rows (GridCountX * GridCountZ)
+    // Phase 2 = Z-columns (GridCountX * GridCountY)
+    int32 CurrentPhase = 0;
+    int32 CurrentPhaseRowIndex = 0;
+
     // Internal: process a portion of rows each tick to avoid hitching
     void ProcessRowsStep(int32 MaxRowsPerTick);
     void ProcessRowsStep_SubSampling(int32 MaxCellsPerTick, const FCollisionQueryParams &QueryParams);

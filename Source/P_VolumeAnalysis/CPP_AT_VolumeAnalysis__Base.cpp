@@ -1,27 +1,14 @@
-/*
- * @Author: Punal Manalan
- * @Description: Volume Analysis Plugin.
- * @Date: 18/10/2025
- */
-
+// Copyright (c) 2025
 #include "CPP_AT_VolumeAnalysis__Base.h"
-#include "Components/SceneComponent.h"
+#include "CPP_BPL__VolumeAnalysis.h"
 #include "DrawDebugHelpers.h"
-#include "Logging/LogMacros.h"
+#include "Engine/World.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogPVolActor, Log, All);
 
-/**
- * Constructor - Initialize default values and create components
- */
 ACPP_AT_VolumeAnalysis_Base::ACPP_AT_VolumeAnalysis_Base()
 {
-    // Enable tick for this actor so we can update analysis over time
     PrimaryActorTick.bCanEverTick = true;
-
-    // Create the root scene component to anchor everything
-    USceneComponent *RootComp = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
-    RootComponent = RootComp;
 }
 
 /**
@@ -29,108 +16,92 @@ ACPP_AT_VolumeAnalysis_Base::ACPP_AT_VolumeAnalysis_Base()
  */
 void ACPP_AT_VolumeAnalysis_Base::BeginPlay()
 {
-    // Call parent implementation
     Super::BeginPlay();
 }
 
-/**
- * Called every frame to update analysis progress and handle auto-updates
- */
 void ACPP_AT_VolumeAnalysis_Base::Tick(float DeltaTime)
 {
-    // Call parent implementation first
     Super::Tick(DeltaTime);
-
     if (bIsRunning)
     {
-        // Process a few rows per tick to spread work (tune as needed)
         ProcessRowsStep(RowsPerTick);
     }
 }
 
-/**
- * Start a new Volume analysis
- * Generates trace endpoints and begins processing
- */
 void ACPP_AT_VolumeAnalysis_Base::StartAnalysis()
 {
-    // Reset counts and results
-    AnalysisResults.Reset();
-    VisibleCount = 0;
-    HiddenCount = 0;
-
-    // Validate input linked box: gather any valid points
-    TArray<FVector> TempPts;
-    TempPts.Reserve(8);
-    for (const TPair<EE_Box_8Point, FS_LinkedSharedPoint> &Pair : VolumeBox.Points)
+    if (!GetWorld())
     {
-        if (Pair.Value.IsSharedPointValid())
-        {
-            TempPts.Add(Pair.Value.GetPoint());
-        }
-    }
-    if (TempPts.Num() < 2)
-    {
-        UE_LOG(LogPVolActor, Warning, TEXT("StartAnalysis: VolumeBox has insufficient valid points: %d"), TempPts.Num());
-        bIsRunning = false;
+        UE_LOG(LogPVolActor, Warning, TEXT("StartAnalysis: No World"));
         return;
     }
 
-    // Compute axis-aligned bounding box from provided points
-    const FBox Box = UCPP_BPL__VolumeAnalysis::MakeBoxFromPoints(TempPts);
-    if (!Box.IsValid)
+    // Build AABB from provided volume box
+    const FBox AABB = UCPP_BPL__VolumeAnalysis::LinkedBox_GetAABB(VolumeBox);
+    if (!AABB.IsValid)
     {
-        UE_LOG(LogPVolActor, Warning, TEXT("StartAnalysis: Computed Box is invalid"));
-        bIsRunning = false;
+        UE_LOG(LogPVolActor, Warning, TEXT("StartAnalysis: Invalid AABB from VolumeBox"));
         return;
     }
 
-    // Generate voxel boxes within the box
+    // Generate voxel grid
     PendingBoxes.Reset();
+    UCPP_BPL__VolumeAnalysis::GenerateVoxelGridBoxes_ByCounts(AABB, SampleCountX, SampleCountY, SampleCountZ, PendingBoxes);
+
     GridCountX = SampleCountX;
     GridCountY = SampleCountY;
     GridCountZ = SampleCountZ;
-    UCPP_BPL__VolumeAnalysis::GenerateVoxelGridBoxes_ByCounts(Box, GridCountX, GridCountY, GridCountZ, PendingBoxes);
-    // Cache cell sizes for overlap radius auto scaling
-    const FVector Extent = Box.GetExtent();
-    CellSizeX = (GridCountX > 0) ? (Extent.X * 2.f / GridCountX) : 0.f;
-    CellSizeY = (GridCountY > 0) ? (Extent.Y * 2.f / GridCountY) : 0.f;
-    CellSizeZ = (GridCountZ > 0) ? (Extent.Z * 2.f / GridCountZ) : 0.f;
-    CurrentCellIndex = 0;
-    bIsSubSampling = false;
-    HiddenBoxIndices.Reset();
-    CurrentHiddenIndex = 0;
-    bIsRunning = PendingBoxes.Num() > 0;
-    UE_LOG(LogPVolActor, Display, TEXT("StartAnalysis: Generated %d voxel boxes; Running=%s"), PendingBoxes.Num(), bIsRunning ? TEXT("true") : TEXT("false"));
 
-    if (bDrawDebug && bDrawDebugBox)
+    // Compute approx cell sizes (for overlap radius auto)
+    const FVector BoxSize = AABB.GetSize();
+    CellSizeX = (GridCountX > 0) ? (BoxSize.X / GridCountX) : 0.f;
+    CellSizeY = (GridCountY > 0) ? (BoxSize.Y / GridCountY) : 0.f;
+    CellSizeZ = (GridCountZ > 0) ? (BoxSize.Z / GridCountZ) : 0.f;
+
+    // Reset visibility
+    for (FS_LinkedBox &B : PendingBoxes)
     {
-        DrawAABB(Box, FColor::Yellow);
+        B.VisibilityMask = 0;
     }
-}
 
-/**
- * Stop the current analysis if running
- */
-void ACPP_AT_VolumeAnalysis_Base::StopAnalysis()
-{
-    bIsRunning = false;
-}
-
-/**
- * Clear all analysis results and visualization
- */
-void ACPP_AT_VolumeAnalysis_Base::ClearResults()
-{
+    // Reset state
     AnalysisResults.Reset();
     VisibleCount = 0;
     HiddenCount = 0;
-    PendingBoxes.Reset();
-    CurrentCellIndex = 0;
     bIsSubSampling = false;
     HiddenBoxIndices.Reset();
     CurrentHiddenIndex = 0;
+    CurrentCellIndex = 0;
+    CurrentPhase = 0;
+    CurrentPhaseRowIndex = 0;
+    bIsRunning = true;
+
+    if (bDrawDebug && bDrawDebugBox)
+    {
+        DrawAABB(AABB, FColor::Yellow);
+    }
+}
+
+void ACPP_AT_VolumeAnalysis_Base::StopAnalysis()
+{
     bIsRunning = false;
+    bIsSubSampling = false;
+}
+
+void ACPP_AT_VolumeAnalysis_Base::ClearResults()
+{
+    StopAnalysis();
+    AnalysisResults.Reset();
+    PendingBoxes.Reset();
+    VisibleCount = 0;
+    HiddenCount = 0;
+    GridCountX = GridCountY = GridCountZ = 0;
+    CellSizeX = CellSizeY = CellSizeZ = 0.f;
+    HiddenBoxIndices.Reset();
+    CurrentHiddenIndex = 0;
+    CurrentCellIndex = 0;
+    CurrentPhase = 0;
+    CurrentPhaseRowIndex = 0;
 }
 
 TArray<FS_LinkedBox> ACPP_AT_VolumeAnalysis_Base::GetAnalysisResults()
@@ -195,160 +166,321 @@ void ACPP_AT_VolumeAnalysis_Base::ProcessRowsStep(int32 MaxRowsPerTick)
         return Z * (GridCountY * GridCountX) + Y * GridCountX + X;
     };
 
-    int32 CellsProcessed = 0;
-    while (bIsRunning && CellsProcessed < MaxRowsPerTick && CurrentCellIndex < PendingBoxes.Num())
+    auto IsCenterFree = [&](const FVector &C) -> bool
     {
-        const int32 ZIndex = CurrentCellIndex / (GridCountY * GridCountX);
-        const int32 Rem = CurrentCellIndex % (GridCountY * GridCountX);
-        const int32 YIndex = Rem / GridCountX;
-        const int32 XIndex = Rem % GridCountX;
-
-        FS_LinkedBox &ABox = PendingBoxes[CurrentCellIndex];
-        const FVector AC = GetCenter(ABox);
-
-        auto TraceBetween = [&](const FVector &P0, const FVector &P1) -> bool
+        if (!bUseCenterOverlapTest)
         {
+            return true;
+        }
+        const float AutoR = 0.25f * FMath::Max(0.001f, FMath::Min3(CellSizeX, CellSizeY, CellSizeZ));
+        const float Radius = (CenterOverlapRadius > 0.f) ? CenterOverlapRadius : AutoR;
+        FCollisionShape Shape = FCollisionShape::MakeSphere(Radius);
+        FHitResult OverlapHit;
+        const bool bHitOverlap = GetWorld()->SweepSingleByChannel(OverlapHit, C, C, FQuat::Identity, TraceChannel, Shape, QueryParams);
+        return !bHitOverlap;
+    };
+
+    // Helpers to scan a row along a principal axis using long traces segmented by hits
+    auto ScanRowX = [&](int32 YIndex, int32 ZIndex)
+    {
+        const int32 Count = GridCountX;
+        if (Count <= 0)
+            return;
+        const auto RowCenter = [&](int32 Xi) -> FVector { return GetCenter(PendingBoxes[Index(Xi, YIndex, ZIndex)]); };
+
+        if (Count == 1)
+        {
+            const FVector C = RowCenter(0);
+            if (IsCenterFree(C))
+                PendingBoxes[Index(0, YIndex, ZIndex)].VisibilityMask = 1;
+            return;
+        }
+
+        const FVector FirstC = RowCenter(0);
+        const FVector SecondC = RowCenter(1);
+        const float StepLen = FVector::Distance(FirstC, SecondC);
+        int32 StartI = 0;
+        while (StartI < Count)
+        {
+            int32 TargetI = Count - 1;
+            if (MaxTraceDistance > 0.f && StepLen > KINDA_SMALL_NUMBER)
+            {
+                const int32 MaxSteps = FMath::Clamp(static_cast<int32>(FMath::FloorToInt(MaxTraceDistance / StepLen)), 1, Count - 1);
+                TargetI = FMath::Min(StartI + MaxSteps, Count - 1);
+            }
+            const FVector StartC = RowCenter(StartI);
+            const FVector EndC = RowCenter(TargetI);
             FHitResult Hit;
-            const bool bHit = GetWorld()->LineTraceSingleByChannel(Hit, P0, P1, TraceChannel, QueryParams);
-            return !bHit; // true if clear path
-        };
-
-        auto IsCenterFree = [&](const FVector &C) -> bool
-        {
-            if (!bUseCenterOverlapTest)
+            const bool bHit = GetWorld()->LineTraceSingleByChannel(Hit, StartC, EndC, TraceChannel, QueryParams);
+            if (!bHit)
             {
-                return true;
+                for (int32 i = StartI; i <= TargetI; ++i)
+                {
+                    const FVector C = RowCenter(i);
+                    if (IsCenterFree(C))
+                        PendingBoxes[Index(i, YIndex, ZIndex)].VisibilityMask = 1;
+                }
+                if (bDrawDebug && bDrawDebugRays)
+                {
+                    DrawDebugLine(GetWorld(), StartC, EndC, FColor::Green, DebugDrawDuration > 0.f, DebugDrawDuration, 0, DebugLineThickness);
+                }
+                StartI = TargetI + 1;
             }
-            const float AutoR = 0.25f * FMath::Max(0.001f, FMath::Min3(CellSizeX, CellSizeY, CellSizeZ));
-            const float Radius = (CenterOverlapRadius > 0.f) ? CenterOverlapRadius : AutoR;
-            // SphereOverlap returns actors; we can use a collision query via Sweep with a small sphere
-            FCollisionShape Shape = FCollisionShape::MakeSphere(Radius);
+            else
+            {
+                const float SegmentLen = FVector::Distance(StartC, EndC);
+                const float HitDist = FMath::Clamp(Hit.Time * SegmentLen, 0.f, SegmentLen);
+                int32 HitIndex = StartI;
+                if (StepLen > KINDA_SMALL_NUMBER)
+                {
+                    HitIndex = FMath::Clamp(StartI + FMath::FloorToInt(HitDist / StepLen + 1e-3f), StartI, TargetI);
+                }
+                for (int32 i = StartI; i <= HitIndex; ++i)
+                {
+                    const FVector C = RowCenter(i);
+                    if (IsCenterFree(C))
+                        PendingBoxes[Index(i, YIndex, ZIndex)].VisibilityMask = 1;
+                }
+                if (bDrawDebug && bDrawDebugRays)
+                {
+                    const FVector HitPoint = StartC + (EndC - StartC) * Hit.Time;
+                    DrawDebugLine(GetWorld(), StartC, HitPoint, FColor::Green, DebugDrawDuration > 0.f, DebugDrawDuration, 0, DebugLineThickness);
+                    DrawDebugLine(GetWorld(), HitPoint, EndC, FColor::Red, DebugDrawDuration > 0.f, DebugDrawDuration, 0, DebugLineThickness);
+                }
+                StartI = FMath::Min(HitIndex + 1, Count);
+            }
+        }
+    };
+
+    auto ScanRowY = [&](int32 XIndex, int32 ZIndex)
+    {
+        const int32 Count = GridCountY;
+        if (Count <= 0)
+            return;
+        const auto RowCenter = [&](int32 Yi) -> FVector { return GetCenter(PendingBoxes[Index(XIndex, Yi, ZIndex)]); };
+
+        if (Count == 1)
+        {
+            const FVector C = RowCenter(0);
+            if (IsCenterFree(C))
+                PendingBoxes[Index(XIndex, 0, ZIndex)].VisibilityMask = 1;
+            return;
+        }
+
+        const FVector FirstC = RowCenter(0);
+        const FVector SecondC = RowCenter(1);
+        const float StepLen = FVector::Distance(FirstC, SecondC);
+        int32 StartI = 0;
+        while (StartI < Count)
+        {
+            int32 TargetI = Count - 1;
+            if (MaxTraceDistance > 0.f && StepLen > KINDA_SMALL_NUMBER)
+            {
+                const int32 MaxSteps = FMath::Clamp(static_cast<int32>(FMath::FloorToInt(MaxTraceDistance / StepLen)), 1, Count - 1);
+                TargetI = FMath::Min(StartI + MaxSteps, Count - 1);
+            }
+            const FVector StartC = RowCenter(StartI);
+            const FVector EndC = RowCenter(TargetI);
             FHitResult Hit;
-            const bool bHit = GetWorld()->SweepSingleByChannel(Hit, C, C, FQuat::Identity, TraceChannel, Shape, QueryParams);
-            return !bHit;
-        };
-
-        // +X neighbor
-        if (XIndex + 1 < GridCountX)
-        {
-            FS_LinkedBox &BBox = PendingBoxes[Index(XIndex + 1, YIndex, ZIndex)];
-            const FVector BC = GetCenter(BBox);
-            const bool bClear = TraceBetween(AC, BC);
-            if (bClear && IsCenterFree(AC) && IsCenterFree(BC))
+            const bool bHit = GetWorld()->LineTraceSingleByChannel(Hit, StartC, EndC, TraceChannel, QueryParams);
+            if (!bHit)
             {
-                ABox.VisibilityMask = 1;
-                BBox.VisibilityMask = 1;
+                for (int32 i = StartI; i <= TargetI; ++i)
+                {
+                    const FVector C = RowCenter(i);
+                    if (IsCenterFree(C))
+                        PendingBoxes[Index(XIndex, i, ZIndex)].VisibilityMask = 1;
+                }
+                if (bDrawDebug && bDrawDebugRays)
+                {
+                    DrawDebugLine(GetWorld(), StartC, EndC, FColor::Green, DebugDrawDuration > 0.f, DebugDrawDuration, 0, DebugLineThickness);
+                }
+                StartI = TargetI + 1;
             }
-            if (bDrawDebug && bDrawDebugRays)
+            else
             {
-                DrawDebugLine(GetWorld(), AC, BC, bClear ? FColor::Green : FColor::Red, DebugDrawDuration > 0.f, DebugDrawDuration, 0, DebugLineThickness);
-            }
-        }
-
-        // -X neighbor
-        if (XIndex - 1 >= 0)
-        {
-            FS_LinkedBox &BBox = PendingBoxes[Index(XIndex - 1, YIndex, ZIndex)];
-            const FVector BC = GetCenter(BBox);
-            const bool bClear = TraceBetween(AC, BC);
-            if (bClear && IsCenterFree(AC) && IsCenterFree(BC))
-            {
-                ABox.VisibilityMask = 1;
-                BBox.VisibilityMask = 1;
-            }
-            if (bDrawDebug && bDrawDebugRays)
-            {
-                DrawDebugLine(GetWorld(), AC, BC, bClear ? FColor::Green : FColor::Red, DebugDrawDuration > 0.f, DebugDrawDuration, 0, DebugLineThickness);
-            }
-        }
-
-        // +Y neighbor
-        if (YIndex + 1 < GridCountY)
-        {
-            FS_LinkedBox &BBox = PendingBoxes[Index(XIndex, YIndex + 1, ZIndex)];
-            const FVector BC = GetCenter(BBox);
-            const bool bClear = TraceBetween(AC, BC);
-            if (bClear && IsCenterFree(AC) && IsCenterFree(BC))
-            {
-                ABox.VisibilityMask = 1;
-                BBox.VisibilityMask = 1;
-            }
-            if (bDrawDebug && bDrawDebugRays)
-            {
-                DrawDebugLine(GetWorld(), AC, BC, bClear ? FColor::Green : FColor::Red, DebugDrawDuration > 0.f, DebugDrawDuration, 0, DebugLineThickness);
+                const float SegmentLen = FVector::Distance(StartC, EndC);
+                const float HitDist = FMath::Clamp(Hit.Time * SegmentLen, 0.f, SegmentLen);
+                int32 HitIndex = StartI;
+                if (StepLen > KINDA_SMALL_NUMBER)
+                {
+                    HitIndex = FMath::Clamp(StartI + FMath::FloorToInt(HitDist / StepLen + 1e-3f), StartI, TargetI);
+                }
+                for (int32 i = StartI; i <= HitIndex; ++i)
+                {
+                    const FVector C = RowCenter(i);
+                    if (IsCenterFree(C))
+                        PendingBoxes[Index(XIndex, i, ZIndex)].VisibilityMask = 1;
+                }
+                if (bDrawDebug && bDrawDebugRays)
+                {
+                    const FVector HitPoint = StartC + (EndC - StartC) * Hit.Time;
+                    DrawDebugLine(GetWorld(), StartC, HitPoint, FColor::Green, DebugDrawDuration > 0.f, DebugDrawDuration, 0, DebugLineThickness);
+                    DrawDebugLine(GetWorld(), HitPoint, EndC, FColor::Red, DebugDrawDuration > 0.f, DebugDrawDuration, 0, DebugLineThickness);
+                }
+                StartI = FMath::Min(HitIndex + 1, Count);
             }
         }
+    };
 
-        // -Y neighbor
-        if (YIndex - 1 >= 0)
+    auto ScanColumnZ = [&](int32 XIndex, int32 YIndex)
+    {
+        const int32 Count = GridCountZ;
+        if (Count <= 0)
+            return;
+        const auto ColCenter = [&](int32 Zi) -> FVector { return GetCenter(PendingBoxes[Index(XIndex, YIndex, Zi)]); };
+
+        if (Count == 1)
         {
-            FS_LinkedBox &BBox = PendingBoxes[Index(XIndex, YIndex - 1, ZIndex)];
-            const FVector BC = GetCenter(BBox);
-            const bool bClear = TraceBetween(AC, BC);
-            if (bClear && IsCenterFree(AC) && IsCenterFree(BC))
-            {
-                ABox.VisibilityMask = 1;
-                BBox.VisibilityMask = 1;
-            }
-            if (bDrawDebug && bDrawDebugRays)
-            {
-                DrawDebugLine(GetWorld(), AC, BC, bClear ? FColor::Green : FColor::Red, DebugDrawDuration > 0.f, DebugDrawDuration, 0, DebugLineThickness);
-            }
+            const FVector C = ColCenter(0);
+            if (IsCenterFree(C))
+                PendingBoxes[Index(XIndex, YIndex, 0)].VisibilityMask = 1;
+            return;
         }
 
-        // +Z neighbor
-        if (ZIndex + 1 < GridCountZ)
+        const FVector FirstC = ColCenter(0);
+        const FVector SecondC = ColCenter(1);
+        const float StepLen = FVector::Distance(FirstC, SecondC);
+        int32 StartI = 0;
+        while (StartI < Count)
         {
-            FS_LinkedBox &BBox = PendingBoxes[Index(XIndex, YIndex, ZIndex + 1)];
-            const FVector BC = GetCenter(BBox);
-            const bool bClear = TraceBetween(AC, BC);
-            if (bClear && IsCenterFree(AC) && IsCenterFree(BC))
+            int32 TargetI = Count - 1;
+            if (MaxTraceDistance > 0.f && StepLen > KINDA_SMALL_NUMBER)
             {
-                ABox.VisibilityMask = 1;
-                BBox.VisibilityMask = 1;
+                const int32 MaxSteps = FMath::Clamp(static_cast<int32>(FMath::FloorToInt(MaxTraceDistance / StepLen)), 1, Count - 1);
+                TargetI = FMath::Min(StartI + MaxSteps, Count - 1);
             }
-            if (bDrawDebug && bDrawDebugRays)
+            const FVector StartC = ColCenter(StartI);
+            const FVector EndC = ColCenter(TargetI);
+            FHitResult Hit;
+            const bool bHit = GetWorld()->LineTraceSingleByChannel(Hit, StartC, EndC, TraceChannel, QueryParams);
+            if (!bHit)
             {
-                DrawDebugLine(GetWorld(), AC, BC, bClear ? FColor::Green : FColor::Red, DebugDrawDuration > 0.f, DebugDrawDuration, 0, DebugLineThickness);
+                for (int32 i = StartI; i <= TargetI; ++i)
+                {
+                    const FVector C = ColCenter(i);
+                    if (IsCenterFree(C))
+                        PendingBoxes[Index(XIndex, YIndex, i)].VisibilityMask = 1;
+                }
+                if (bDrawDebug && bDrawDebugRays)
+                {
+                    DrawDebugLine(GetWorld(), StartC, EndC, FColor::Green, DebugDrawDuration > 0.f, DebugDrawDuration, 0, DebugLineThickness);
+                }
+                StartI = TargetI + 1;
+            }
+            else
+            {
+                const float SegmentLen = FVector::Distance(StartC, EndC);
+                const float HitDist = FMath::Clamp(Hit.Time * SegmentLen, 0.f, SegmentLen);
+                int32 HitIndex = StartI;
+                if (StepLen > KINDA_SMALL_NUMBER)
+                {
+                    HitIndex = FMath::Clamp(StartI + FMath::FloorToInt(HitDist / StepLen + 1e-3f), StartI, TargetI);
+                }
+                for (int32 i = StartI; i <= HitIndex; ++i)
+                {
+                    const FVector C = ColCenter(i);
+                    if (IsCenterFree(C))
+                        PendingBoxes[Index(XIndex, YIndex, i)].VisibilityMask = 1;
+                }
+                if (bDrawDebug && bDrawDebugRays)
+                {
+                    const FVector HitPoint = StartC + (EndC - StartC) * Hit.Time;
+                    DrawDebugLine(GetWorld(), StartC, HitPoint, FColor::Green, DebugDrawDuration > 0.f, DebugDrawDuration, 0, DebugLineThickness);
+                    DrawDebugLine(GetWorld(), HitPoint, EndC, FColor::Red, DebugDrawDuration > 0.f, DebugDrawDuration, 0, DebugLineThickness);
+                }
+                StartI = FMath::Min(HitIndex + 1, Count);
             }
         }
+    };
 
-        // -Z neighbor
-        if (ZIndex - 1 >= 0)
+    int32 RowsProcessed = 0;
+    while (bIsRunning && RowsProcessed < MaxRowsPerTick && CurrentPhase < 3)
+    {
+        if (CurrentPhase == 0)
         {
-            FS_LinkedBox &BBox = PendingBoxes[Index(XIndex, YIndex, ZIndex - 1)];
-            const FVector BC = GetCenter(BBox);
-            const bool bClear = TraceBetween(AC, BC);
-            if (bClear && IsCenterFree(AC) && IsCenterFree(BC))
+            const int32 TotalRows = GridCountY * GridCountZ;
+            if (TotalRows <= 0)
             {
-                ABox.VisibilityMask = 1;
-                BBox.VisibilityMask = 1;
+                CurrentPhase = 1;
+                CurrentPhaseRowIndex = 0;
+                continue;
             }
-            if (bDrawDebug && bDrawDebugRays)
-            {
-                DrawDebugLine(GetWorld(), AC, BC, bClear ? FColor::Green : FColor::Red, DebugDrawDuration > 0.f, DebugDrawDuration, 0, DebugLineThickness);
-            }
-        }
 
-        ++CurrentCellIndex;
-        ++CellsProcessed;
+            const int32 RowIdx = CurrentPhaseRowIndex;
+            if (RowIdx >= TotalRows)
+            {
+                CurrentPhase = 1;
+                CurrentPhaseRowIndex = 0;
+                continue;
+            }
+            const int32 ZIndex = RowIdx / GridCountY;
+            const int32 YIndex = RowIdx % GridCountY;
+            ScanRowX(YIndex, ZIndex);
+            ++CurrentPhaseRowIndex;
+            ++RowsProcessed;
+        }
+        else if (CurrentPhase == 1)
+        {
+            const int32 TotalRows = GridCountX * GridCountZ;
+            if (TotalRows <= 0)
+            {
+                CurrentPhase = 2;
+                CurrentPhaseRowIndex = 0;
+                continue;
+            }
+            const int32 RowIdx = CurrentPhaseRowIndex;
+            if (RowIdx >= TotalRows)
+            {
+                CurrentPhase = 2;
+                CurrentPhaseRowIndex = 0;
+                continue;
+            }
+            const int32 ZIndex = RowIdx / GridCountX;
+            const int32 XIndex = RowIdx % GridCountX;
+            ScanRowY(XIndex, ZIndex);
+            ++CurrentPhaseRowIndex;
+            ++RowsProcessed;
+        }
+        else if (CurrentPhase == 2)
+        {
+            const int32 TotalCols = GridCountX * GridCountY;
+            if (TotalCols <= 0)
+            {
+                CurrentPhase = 3;
+                break;
+            }
+            const int32 ColIdx = CurrentPhaseRowIndex;
+            if (ColIdx >= TotalCols)
+            {
+                CurrentPhase = 3;
+                break;
+            }
+            const int32 YIndex = ColIdx / GridCountX;
+            const int32 XIndex = ColIdx % GridCountX;
+            ScanColumnZ(XIndex, YIndex);
+            ++CurrentPhaseRowIndex;
+            ++RowsProcessed;
+        }
     }
 
-    // If done, broadcast and stop
-    if (bIsRunning && CurrentCellIndex < PendingBoxes.Num())
+    // progress log
+    if (bIsRunning && CurrentPhase < 3)
     {
-        UE_LOG(LogPVolActor, VeryVerbose, TEXT("ProcessRowsStep: Progress Cell=%d/%d"), CurrentCellIndex, PendingBoxes.Num());
+        UE_LOG(LogPVolActor, VeryVerbose, TEXT("ProcessRowsStep: Phase=%d Row=%d"), CurrentPhase, CurrentPhaseRowIndex);
     }
 
-    if (CurrentCellIndex >= PendingBoxes.Num())
+    const bool bMainCompleted = (CurrentPhase >= 3);
+    if (bMainCompleted)
     {
-        // Main pass completed; optionally start sub-sampling for hidden boxes
+        // Signal main pass complete by setting CurrentCellIndex beyond range for compatibility with downstream logic
+        CurrentCellIndex = PendingBoxes.Num();
+
         if (bEnableSubSampling && !bIsSubSampling)
         {
             HiddenBoxIndices.Reset();
             HiddenBoxIndices.Reserve(PendingBoxes.Num());
             int32 TmpVisible = 0;
-            int32 TmpHidden = 0;
             for (int32 i = 0; i < PendingBoxes.Num(); ++i)
             {
                 if (PendingBoxes[i].VisibilityMask == 0)
@@ -360,17 +492,14 @@ void ACPP_AT_VolumeAnalysis_Base::ProcessRowsStep(int32 MaxRowsPerTick)
                     ++TmpVisible;
                 }
             }
-            TmpHidden = HiddenBoxIndices.Num();
-            bIsSubSampling = HiddenBoxIndices.Num() > 0;
+            const int32 TmpHidden = HiddenBoxIndices.Num();
+            bIsSubSampling = TmpHidden > 0;
             CurrentHiddenIndex = 0;
             if (bIsSubSampling)
             {
-                // Ensure we remain running for sub-sampling
                 bIsRunning = true;
-                CurrentCellIndex = PendingBoxes.Num();
                 UE_LOG(LogPVolActor, Display, TEXT("SubSampling: %d hidden boxes to refine (Visible after main=%d, Hidden=%d)"), HiddenBoxIndices.Num(), TmpVisible, TmpHidden);
-                // proceed immediately into sub-sampling this tick using remaining budget
-                const int32 Remaining = MaxRowsPerTick - CellsProcessed;
+                const int32 Remaining = MaxRowsPerTick - RowsProcessed;
                 if (Remaining > 0)
                 {
                     ProcessRowsStep_SubSampling(Remaining, QueryParams);
@@ -387,29 +516,19 @@ void ACPP_AT_VolumeAnalysis_Base::ProcessRowsStep(int32 MaxRowsPerTick)
             }
         }
 
-        // If no sub-sampling or none to refine, finalize
         if (!bIsSubSampling)
         {
             bIsRunning = false;
-            // Compute final counts from the grid
             VisibleCount = 0;
             HiddenCount = 0;
             for (const FS_LinkedBox &Box : PendingBoxes)
             {
                 if (Box.VisibilityMask)
-                {
                     ++VisibleCount;
-                }
                 else
-                {
                     ++HiddenCount;
-                }
             }
-
-            // Persist results
             AnalysisResults = PendingBoxes;
-
-            // Optional: draw centers once with their final visibility
             if (bDrawDebug && bDrawDebugPoints)
             {
                 for (const FS_LinkedBox &Box : AnalysisResults)
@@ -418,16 +537,13 @@ void ACPP_AT_VolumeAnalysis_Base::ProcessRowsStep(int32 MaxRowsPerTick)
                     DrawDebugPoint(GetWorld(), C, DebugPointSize, Box.VisibilityMask ? FColor::Green : FColor::Red, DebugDrawDuration > 0.f, DebugDrawDuration);
                 }
             }
-
             UE_LOG(LogPVolActor, Display, TEXT("ProcessRowsStep: Complete; boxes=%d (Visible=%d Hidden=%d)"), AnalysisResults.Num(), VisibleCount, HiddenCount);
             OnAnalysisComplete.Broadcast(AnalysisResults);
         }
     }
-
-    // If main pass still running or we have transitioned into sub-sampling, continue sub-sampling if needed
-    if (bIsSubSampling)
+    else if (bIsSubSampling)
     {
-        const int32 Remaining = MaxRowsPerTick - CellsProcessed;
+        const int32 Remaining = MaxRowsPerTick - RowsProcessed;
         if (Remaining > 0)
         {
             ProcessRowsStep_SubSampling(Remaining, QueryParams);
@@ -503,50 +619,109 @@ void ACPP_AT_VolumeAnalysis_Base::ProcessRowsStep_SubSampling(int32 MaxCellsPerT
         }
 
         bool bAnyVisible = false;
-        // Refine using internal sub-voxel neighbor connectivity inside the parent sample
+        // Optimize refinement using long-trace row scanning along X inside the parent sample
         const auto IndexSub = [&](int32 X, int32 Y, int32 Z) -> int32
         {
             return Z * (SubSampleCountY * SubSampleCountX) + Y * SubSampleCountX + X;
         };
 
+        auto SubCenter = [&](int32 X, int32 Y, int32 Z) -> FVector
+        {
+            return GetCenter(SubVoxels[IndexSub(X, Y, Z)]);
+        };
+
+        // Helper to scan a 1D row by long trace and set bAnyVisible if any free center is reachable
+        auto ScanSubRow = [&](int32 Count, const TFunction<FVector(int32)> &CenterAt)
+        {
+            if (Count <= 0)
+                return;
+            if (Count == 1)
+            {
+                const FVector C = CenterAt(0);
+                if (IsCenterFree(C))
+                    bAnyVisible = true;
+                return;
+            }
+            const FVector FirstC = CenterAt(0), SecondC = CenterAt(1);
+            const float StepLen = FVector::Distance(FirstC, SecondC);
+            int32 StartI = 0;
+            while (StartI < Count)
+            {
+                int32 TargetI = Count - 1;
+                if (MaxTraceDistance > 0.f && StepLen > KINDA_SMALL_NUMBER)
+                {
+                    const int32 MaxSteps = FMath::Clamp(static_cast<int32>(FMath::FloorToInt(MaxTraceDistance / StepLen)), 1, Count - 1);
+                    TargetI = FMath::Min(StartI + MaxSteps, Count - 1);
+                }
+                const FVector StartC = CenterAt(StartI);
+                const FVector EndC = CenterAt(TargetI);
+                FHitResult Hit;
+                const bool bHit = GetWorld()->LineTraceSingleByChannel(Hit, StartC, EndC, TraceChannel, QueryParams);
+                if (!bHit)
+                {
+                    for (int32 i = StartI; i <= TargetI; ++i)
+                    {
+                        const FVector C = CenterAt(i);
+                        if (IsCenterFree(C))
+                            bAnyVisible = true;
+                    }
+                    if (bDrawDebug && bDrawDebugRays)
+                    {
+                        DrawDebugLine(GetWorld(), StartC, EndC, FColor::Cyan, DebugDrawDuration > 0.f, DebugDrawDuration, 0, DebugLineThickness * 0.6f);
+                    }
+                    StartI = TargetI + 1;
+                }
+                else
+                {
+                    const float SegmentLen = FVector::Distance(StartC, EndC);
+                    const float HitDist = FMath::Clamp(Hit.Time * SegmentLen, 0.f, SegmentLen);
+                    int32 HitIndex = StartI;
+                    if (StepLen > KINDA_SMALL_NUMBER)
+                    {
+                        HitIndex = FMath::Clamp(StartI + FMath::FloorToInt(HitDist / StepLen + 1e-3f), StartI, TargetI);
+                    }
+                    for (int32 i = StartI; i <= HitIndex; ++i)
+                    {
+                        const FVector C = CenterAt(i);
+                        if (IsCenterFree(C))
+                            bAnyVisible = true;
+                    }
+                    if (bDrawDebug && bDrawDebugRays)
+                    {
+                        const FVector HitPoint = StartC + (EndC - StartC) * Hit.Time;
+                        DrawDebugLine(GetWorld(), StartC, HitPoint, FColor::Cyan, DebugDrawDuration > 0.f, DebugDrawDuration, 0, DebugLineThickness * 0.6f);
+                        DrawDebugLine(GetWorld(), HitPoint, EndC, FColor::Red, DebugDrawDuration > 0.f, DebugDrawDuration, 0, DebugLineThickness * 0.6f);
+                    }
+                    StartI = FMath::Min(HitIndex + 1, Count);
+                }
+            }
+        };
+
+        // X-axis rows at fixed (y,z)
         for (int32 z = 0; z < SubSampleCountZ; ++z)
         {
             for (int32 y = 0; y < SubSampleCountY; ++y)
             {
-                for (int32 x = 0; x < SubSampleCountX; ++x)
-                {
-                    const FS_LinkedBox &Sub = SubVoxels[IndexSub(x, y, z)];
-                    const FVector SC = GetCenter(Sub);
-
-                    auto CheckNeighbor = [&](int32 nx, int32 ny, int32 nz)
-                    {
-                        const FS_LinkedBox &NSub = SubVoxels[IndexSub(nx, ny, nz)];
-                        const FVector NC = GetCenter(NSub);
-                        const bool bClear = TraceBetween(SC, NC);
-                        if (bDrawDebug && bDrawDebugRays)
-                        {
-                            DrawDebugLine(GetWorld(), SC, NC, bClear ? FColor::Cyan : FColor::Red, DebugDrawDuration > 0.f, DebugDrawDuration, 0, DebugLineThickness * 0.6f);
-                        }
-                        if (bClear && IsCenterFree(SC) && IsCenterFree(NC))
-                        {
-                            bAnyVisible = true;
-                        }
-                    };
-
-                    // 6-neighborhood (±X, ±Y, ±Z) inside the parent sample
-                    if (x + 1 < SubSampleCountX)
-                        CheckNeighbor(x + 1, y, z);
-                    if (x - 1 >= 0)
-                        CheckNeighbor(x - 1, y, z);
-                    if (y + 1 < SubSampleCountY)
-                        CheckNeighbor(x, y + 1, z);
-                    if (y - 1 >= 0)
-                        CheckNeighbor(x, y - 1, z);
-                    if (z + 1 < SubSampleCountZ)
-                        CheckNeighbor(x, y, z + 1);
-                    if (z - 1 >= 0)
-                        CheckNeighbor(x, y, z - 1);
-                }
+                ScanSubRow(SubSampleCountX, [&](int32 x)
+                           { return SubCenter(x, y, z); });
+            }
+        }
+        // Y-axis rows at fixed (x,z)
+        for (int32 z = 0; z < SubSampleCountZ; ++z)
+        {
+            for (int32 x = 0; x < SubSampleCountX; ++x)
+            {
+                ScanSubRow(SubSampleCountY, [&](int32 y)
+                           { return SubCenter(x, y, z); });
+            }
+        }
+        // Z-axis columns at fixed (x,y)
+        for (int32 y = 0; y < SubSampleCountY; ++y)
+        {
+            for (int32 x = 0; x < SubSampleCountX; ++x)
+            {
+                ScanSubRow(SubSampleCountZ, [&](int32 z)
+                           { return SubCenter(x, y, z); });
             }
         }
 
