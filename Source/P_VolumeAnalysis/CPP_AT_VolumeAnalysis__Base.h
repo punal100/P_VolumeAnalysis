@@ -173,6 +173,18 @@ public:
     UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Punal|VolumeAnalysis")
     float GetVisibilityPercentage() const;
 
+    // Load externally computed results into this actor (copy). Recomputes counts and optionally refreshes debug draw.
+    UFUNCTION(BlueprintCallable, Category = "Punal|VolumeAnalysis|IO")
+    void LoadAnalysisResults(const TArray<FS_LinkedBox> &InBoxes, bool bRefreshDebug = true, bool bBroadcastComplete = true);
+
+    // Load results from a JSON file previously saved with SaveLinkedBoxesToJsonFile.
+    UFUNCTION(BlueprintCallable, Category = "Punal|VolumeAnalysis|IO")
+    bool LoadAnalysisResultsFromJsonFile(const FString &FilePath, bool bRefreshDebug = true, bool bBroadcastComplete = true);
+
+    // Convenience: load a single box as the entire result set
+    UFUNCTION(BlueprintCallable, Category = "Punal|VolumeAnalysis|IO")
+    void LoadSingleAnalysisResult(const FS_LinkedBox &InBox, bool bRefreshDebug = true, bool bBroadcastComplete = true);
+
 protected:
     //////////////////////////////////////////////////////////////////////////
     // COMPONENTS

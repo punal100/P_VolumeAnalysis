@@ -7,6 +7,12 @@
 #include "CPP_BPL__VolumeAnalysis.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "DrawDebugHelpers.h"
+#include "Dom/JsonObject.h"
+#include "Serialization/JsonSerializer.h"
+#include "Policies/PrettyJsonPrintPolicy.h"
+#include "Policies/CondensedJsonPrintPolicy.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
 
 FVector UCPP_BPL__VolumeAnalysis::GetClosestPointOnLineSegment(
 	const FVector &Point,
@@ -157,4 +163,246 @@ FBox UCPP_BPL__VolumeAnalysis::LinkedBox_GetAABB(const FS_LinkedBox &InBox)
 		}
 	}
 	return MakeBoxFromPoints(Pts);
+}
+
+// --- JSON Serialization ---
+static FString EnumToString(EE_Box_8Point Corner)
+{
+	if (const UEnum *Enum = StaticEnum<EE_Box_8Point>())
+	{
+		return Enum->GetNameStringByValue(static_cast<int64>(Corner));
+	}
+	return TEXT("");
+}
+
+static TSharedPtr<FJsonObject> MakeJsonFromVector(const FVector &V)
+{
+	TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+	Obj->SetNumberField(TEXT("X"), V.X);
+	Obj->SetNumberField(TEXT("Y"), V.Y);
+	Obj->SetNumberField(TEXT("Z"), V.Z);
+	return Obj;
+}
+
+static TSharedPtr<FJsonObject> MakeJsonFromLinkedBox(const FS_LinkedBox &InBox)
+{
+	TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
+	Root->SetNumberField(TEXT("VisibilityMask"), static_cast<double>(InBox.VisibilityMask));
+
+	// Points as object mapping enum-name -> {X,Y,Z}
+	TSharedPtr<FJsonObject> PointsObj = MakeShared<FJsonObject>();
+	for (const TPair<EE_Box_8Point, FS_LinkedSharedPoint> &Pair : InBox.Points)
+	{
+		if (Pair.Value.IsSharedPointValid())
+		{
+			const FString Key = EnumToString(Pair.Key);
+			const FVector P = Pair.Value.GetPoint();
+			PointsObj->SetObjectField(Key, MakeJsonFromVector(P));
+		}
+	}
+	Root->SetObjectField(TEXT("Points"), PointsObj);
+	return Root;
+}
+
+bool UCPP_BPL__VolumeAnalysis::LinkedBox_ToJsonString(const FS_LinkedBox &InBox, FString &OutJson, bool bPretty)
+{
+	OutJson.Reset();
+	const TSharedPtr<FJsonObject> Root = MakeJsonFromLinkedBox(InBox);
+	if (!Root.IsValid())
+	{
+		return false;
+	}
+	bool bOk = false;
+	if (bPretty)
+	{
+		TSharedRef<TJsonWriter<TCHAR, TPrettyJsonPrintPolicy<TCHAR>>> Writer = TJsonWriterFactory<TCHAR, TPrettyJsonPrintPolicy<TCHAR>>::Create(&OutJson);
+		bOk = FJsonSerializer::Serialize(Root.ToSharedRef(), Writer);
+	}
+	else
+	{
+		TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer = TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&OutJson);
+		bOk = FJsonSerializer::Serialize(Root.ToSharedRef(), Writer);
+	}
+	return bOk;
+}
+
+bool UCPP_BPL__VolumeAnalysis::SaveLinkedBoxToJsonFile(const FS_LinkedBox &InBox, const FString &FilePath, bool bPretty)
+{
+	FString Json;
+	if (!LinkedBox_ToJsonString(InBox, Json, bPretty))
+	{
+		return false;
+	}
+	return FFileHelper::SaveStringToFile(Json, *FilePath);
+}
+
+bool UCPP_BPL__VolumeAnalysis::LinkedBoxes_ToJsonString(const TArray<FS_LinkedBox> &InBoxes, FString &OutJson, bool bPretty)
+{
+	OutJson.Reset();
+	TArray<TSharedPtr<FJsonValue>> Items;
+	Items.Reserve(InBoxes.Num());
+	for (const FS_LinkedBox &Box : InBoxes)
+	{
+		TSharedPtr<FJsonObject> Obj = MakeJsonFromLinkedBox(Box);
+		Items.Add(MakeShared<FJsonValueObject>(Obj));
+	}
+	// Serialize as a JSON array
+	bool bOk = false;
+	if (bPretty)
+	{
+		TSharedRef<TJsonWriter<TCHAR, TPrettyJsonPrintPolicy<TCHAR>>> Writer = TJsonWriterFactory<TCHAR, TPrettyJsonPrintPolicy<TCHAR>>::Create(&OutJson);
+		bOk = FJsonSerializer::Serialize(Items, Writer);
+	}
+	else
+	{
+		TSharedRef<TJsonWriter<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>> Writer = TJsonWriterFactory<TCHAR, TCondensedJsonPrintPolicy<TCHAR>>::Create(&OutJson);
+		bOk = FJsonSerializer::Serialize(Items, Writer);
+	}
+	return bOk;
+}
+
+bool UCPP_BPL__VolumeAnalysis::SaveLinkedBoxesToJsonFile(const TArray<FS_LinkedBox> &InBoxes, const FString &FilePath, bool bPretty)
+{
+	FString Json;
+	if (!LinkedBoxes_ToJsonString(InBoxes, Json, bPretty))
+	{
+		return false;
+	}
+	return FFileHelper::SaveStringToFile(Json, *FilePath);
+}
+
+// --- JSON Deserialization ---
+static bool StringToEnum(const FString &Name, EE_Box_8Point &OutCorner)
+{
+	if (const UEnum *Enum = StaticEnum<EE_Box_8Point>())
+	{
+		int64 Value = Enum->GetValueByNameString(Name);
+		if (Value != INDEX_NONE)
+		{
+			OutCorner = static_cast<EE_Box_8Point>(Value);
+			return true;
+		}
+	}
+	return false;
+}
+
+static bool JsonToVector(const TSharedPtr<FJsonObject> &Obj, FVector &Out)
+{
+	if (!Obj.IsValid())
+		return false;
+	double X = 0, Y = 0, Z = 0;
+	if (!Obj->TryGetNumberField(TEXT("X"), X))
+		return false;
+	if (!Obj->TryGetNumberField(TEXT("Y"), Y))
+		return false;
+	if (!Obj->TryGetNumberField(TEXT("Z"), Z))
+		return false;
+	Out = FVector((float)X, (float)Y, (float)Z);
+	return true;
+}
+
+static bool JsonObjectToLinkedBox(const TSharedPtr<FJsonObject> &Root, FS_LinkedBox &OutBox)
+{
+	if (!Root.IsValid())
+		return false;
+	// Visibility
+	double VM = 0.0;
+	if (Root->TryGetNumberField(TEXT("VisibilityMask"), VM))
+	{
+		OutBox.VisibilityMask = static_cast<uint8>((int32)VM & 0xFF);
+	}
+	else
+	{
+		OutBox.VisibilityMask = 0;
+	}
+	// Points
+	TSharedPtr<FJsonObject> PointsObj = Root->GetObjectField(TEXT("Points"));
+	if (PointsObj.IsValid())
+	{
+		for (const auto &Pair : PointsObj->Values)
+		{
+			EE_Box_8Point Corner;
+			if (!StringToEnum(Pair.Key, Corner))
+			{
+				continue; // skip unknown keys
+			}
+			TSharedPtr<FJsonObject> VecObj = Pair.Value->AsObject();
+			FVector P;
+			if (JsonToVector(VecObj, P))
+			{
+				OutBox.SetBoxPoint(Corner, P);
+			}
+		}
+	}
+	return true;
+}
+
+bool UCPP_BPL__VolumeAnalysis::LinkedBox_FromJsonString(const FString &InJson, FS_LinkedBox &OutBox)
+{
+	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(InJson);
+	TSharedPtr<FJsonObject> Root;
+	if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+	{
+		return false;
+	}
+	OutBox = FS_LinkedBox();
+	return JsonObjectToLinkedBox(Root, OutBox);
+}
+
+bool UCPP_BPL__VolumeAnalysis::LoadLinkedBoxFromJsonFile(const FString &FilePath, FS_LinkedBox &OutBox)
+{
+	FString Data;
+	if (!FFileHelper::LoadFileToString(Data, *FilePath))
+	{
+		return false;
+	}
+	return LinkedBox_FromJsonString(Data, OutBox);
+}
+
+bool UCPP_BPL__VolumeAnalysis::LinkedBoxes_FromJsonString(const FString &InJson, TArray<FS_LinkedBox> &OutBoxes)
+{
+	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(InJson);
+	TArray<TSharedPtr<FJsonValue>> Arr;
+	if (!FJsonSerializer::Deserialize(Reader, Arr))
+	{
+		// In case file stored a single object, not an array
+		TSharedPtr<FJsonObject> Obj;
+		TSharedRef<TJsonReader<>> Reader2 = TJsonReaderFactory<>::Create(InJson);
+		if (FJsonSerializer::Deserialize(Reader2, Obj) && Obj.IsValid())
+		{
+			FS_LinkedBox Single;
+			if (JsonObjectToLinkedBox(Obj, Single))
+			{
+				OutBoxes = {Single};
+				return true;
+			}
+		}
+		return false;
+	}
+	OutBoxes.Reset();
+	OutBoxes.Reserve(Arr.Num());
+	for (const TSharedPtr<FJsonValue> &V : Arr)
+	{
+		if (!V.IsValid())
+			continue;
+		TSharedPtr<FJsonObject> Obj = V->AsObject();
+		if (!Obj.IsValid())
+			continue;
+		FS_LinkedBox B;
+		if (JsonObjectToLinkedBox(Obj, B))
+		{
+			OutBoxes.Add(MoveTemp(B));
+		}
+	}
+	return true;
+}
+
+bool UCPP_BPL__VolumeAnalysis::LoadLinkedBoxesFromJsonFile(const FString &FilePath, TArray<FS_LinkedBox> &OutBoxes)
+{
+	FString Data;
+	if (!FFileHelper::LoadFileToString(Data, *FilePath))
+	{
+		return false;
+	}
+	return LinkedBoxes_FromJsonString(Data, OutBoxes);
 }

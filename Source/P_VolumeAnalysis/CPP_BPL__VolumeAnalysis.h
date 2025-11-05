@@ -175,4 +175,31 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Punal|VolumeAnalysis|LinkedBox")
 	static void LinkedBox_LinkTwoBoxPoint(UPARAM(ref) FS_LinkedBox &BoxA, UPARAM(ref) FS_LinkedBox &BoxB, EE_Box_8Point BoxA_Corner, EE_Box_8Point BoxB_Corner);
+
+	// JSON Serialization helpers for FS_LinkedBox
+	UFUNCTION(BlueprintCallable, Category = "Punal|VolumeAnalysis|LinkedBox|JSON")
+	static bool LinkedBox_ToJsonString(const FS_LinkedBox &InBox, FString &OutJson, bool bPretty = true);
+
+	UFUNCTION(BlueprintCallable, Category = "Punal|VolumeAnalysis|LinkedBox|JSON")
+	static bool SaveLinkedBoxToJsonFile(const FS_LinkedBox &InBox, const FString &FilePath, bool bPretty = true);
+
+	// Serialize an array of boxes (e.g., full analysis results) to a JSON array string / file
+	UFUNCTION(BlueprintCallable, Category = "Punal|VolumeAnalysis|LinkedBox|JSON")
+	static bool LinkedBoxes_ToJsonString(const TArray<FS_LinkedBox> &InBoxes, FString &OutJson, bool bPretty = true);
+
+	UFUNCTION(BlueprintCallable, Category = "Punal|VolumeAnalysis|LinkedBox|JSON")
+	static bool SaveLinkedBoxesToJsonFile(const TArray<FS_LinkedBox> &InBoxes, const FString &FilePath, bool bPretty = true);
+
+	// JSON Deserialization helpers
+	UFUNCTION(BlueprintCallable, Category = "Punal|VolumeAnalysis|LinkedBox|JSON")
+	static bool LinkedBox_FromJsonString(const FString &InJson, FS_LinkedBox &OutBox);
+
+	UFUNCTION(BlueprintCallable, Category = "Punal|VolumeAnalysis|LinkedBox|JSON")
+	static bool LoadLinkedBoxFromJsonFile(const FString &FilePath, FS_LinkedBox &OutBox);
+
+	UFUNCTION(BlueprintCallable, Category = "Punal|VolumeAnalysis|LinkedBox|JSON")
+	static bool LinkedBoxes_FromJsonString(const FString &InJson, TArray<FS_LinkedBox> &OutBoxes);
+
+	UFUNCTION(BlueprintCallable, Category = "Punal|VolumeAnalysis|LinkedBox|JSON")
+	static bool LoadLinkedBoxesFromJsonFile(const FString &FilePath, TArray<FS_LinkedBox> &OutBoxes);
 };

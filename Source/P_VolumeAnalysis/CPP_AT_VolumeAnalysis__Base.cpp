@@ -109,6 +109,59 @@ TArray<FS_LinkedBox> ACPP_AT_VolumeAnalysis_Base::GetAnalysisResults()
     return AnalysisResults;
 }
 
+void ACPP_AT_VolumeAnalysis_Base::LoadAnalysisResults(const TArray<FS_LinkedBox> &InBoxes, bool bRefreshDebug, bool bBroadcastComplete)
+{
+    // Stop any running analysis and replace results with a copy of the provided data
+    StopAnalysis();
+    PendingBoxes.Reset();
+    AnalysisResults = InBoxes; // copy
+
+    // Recompute counts
+    VisibleCount = 0;
+    HiddenCount = 0;
+    for (const FS_LinkedBox &Box : AnalysisResults)
+    {
+        if (Box.VisibilityMask)
+            ++VisibleCount;
+        else
+            ++HiddenCount;
+    }
+
+    if (bRefreshDebug && bDrawDebug && bDrawDebugPoints && GetWorld())
+    {
+        for (const FS_LinkedBox &Box : AnalysisResults)
+        {
+            const FVector C = UCPP_BPL__VolumeAnalysis::LinkedBox_GetCenter(Box);
+            DrawDebugPoint(GetWorld(), C, DebugPointSize, Box.VisibilityMask ? FColor::Green : FColor::Red, DebugDrawDuration > 0.f, DebugDrawDuration);
+        }
+    }
+
+    UE_LOG(LogPVolActor, Display, TEXT("LoadAnalysisResults: boxes=%d (Visible=%d Hidden=%d)"), AnalysisResults.Num(), VisibleCount, HiddenCount);
+    if (bBroadcastComplete)
+    {
+        OnAnalysisComplete.Broadcast(AnalysisResults);
+    }
+}
+
+bool ACPP_AT_VolumeAnalysis_Base::LoadAnalysisResultsFromJsonFile(const FString &FilePath, bool bRefreshDebug, bool bBroadcastComplete)
+{
+    TArray<FS_LinkedBox> Boxes;
+    if (!UCPP_BPL__VolumeAnalysis::LoadLinkedBoxesFromJsonFile(FilePath, Boxes))
+    {
+        UE_LOG(LogPVolActor, Warning, TEXT("LoadAnalysisResultsFromJsonFile: Failed to read '%s'"), *FilePath);
+        return false;
+    }
+    LoadAnalysisResults(Boxes, bRefreshDebug, bBroadcastComplete);
+    return true;
+}
+
+void ACPP_AT_VolumeAnalysis_Base::LoadSingleAnalysisResult(const FS_LinkedBox &InBox, bool bRefreshDebug, bool bBroadcastComplete)
+{
+    TArray<FS_LinkedBox> Boxes;
+    Boxes.Add(InBox);
+    LoadAnalysisResults(Boxes, bRefreshDebug, bBroadcastComplete);
+}
+
 /**
  * Get number of visible points in current analysis
  */
@@ -186,7 +239,8 @@ void ACPP_AT_VolumeAnalysis_Base::ProcessRowsStep(int32 MaxRowsPerTick)
         const int32 Count = GridCountX;
         if (Count <= 0)
             return;
-        const auto RowCenter = [&](int32 Xi) -> FVector { return GetCenter(PendingBoxes[Index(Xi, YIndex, ZIndex)]); };
+        const auto RowCenter = [&](int32 Xi) -> FVector
+        { return GetCenter(PendingBoxes[Index(Xi, YIndex, ZIndex)]); };
 
         if (Count == 1)
         {
@@ -257,7 +311,8 @@ void ACPP_AT_VolumeAnalysis_Base::ProcessRowsStep(int32 MaxRowsPerTick)
         const int32 Count = GridCountY;
         if (Count <= 0)
             return;
-        const auto RowCenter = [&](int32 Yi) -> FVector { return GetCenter(PendingBoxes[Index(XIndex, Yi, ZIndex)]); };
+        const auto RowCenter = [&](int32 Yi) -> FVector
+        { return GetCenter(PendingBoxes[Index(XIndex, Yi, ZIndex)]); };
 
         if (Count == 1)
         {
@@ -328,7 +383,8 @@ void ACPP_AT_VolumeAnalysis_Base::ProcessRowsStep(int32 MaxRowsPerTick)
         const int32 Count = GridCountZ;
         if (Count <= 0)
             return;
-        const auto ColCenter = [&](int32 Zi) -> FVector { return GetCenter(PendingBoxes[Index(XIndex, YIndex, Zi)]); };
+        const auto ColCenter = [&](int32 Zi) -> FVector
+        { return GetCenter(PendingBoxes[Index(XIndex, YIndex, Zi)]); };
 
         if (Count == 1)
         {
